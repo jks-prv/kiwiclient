@@ -2,6 +2,8 @@
 
 import array, codecs, logging, os, struct, sys, time, traceback, copy, threading
 from optparse import OptionParser
+import numpy as np
+
 
 import kiwiclient
 
@@ -140,32 +142,32 @@ class KiwiWaterfallRecorder(kiwiclient.KiwiSDRStream):
         self._num_channels = 2 if options.modulation == 'iq' else 1
         self._last_gps = dict(zip(['last_gps_solution', 'dummy', 'gpssec', 'gpsnsec'], [0,0,0,0]))
 
+        self.f_wf = open('waterfall.txt', 'wb')
+
+
     def _setup_rx_params(self):
         self._set_zoom_start(0, 0)
         self._set_maxdb_mindb(-10, -110)    # needed, but values don't matter
         #self._set_wf_comp(True)
         self._set_wf_comp(False)
-        self._set_wf_speed(1)   # 1 Hz update
+        self._set_wf_speed(4)   # 1 Hz update
         self.set_inactivity_timeout(0)
         self.set_name('kiwirecorder.py')
 
     def _process_waterfall_samples(self, seq, samples):
         nbins = len(samples)
         bins = nbins-1
-        max = -1
-        min = 256
-        bmax = bmin = 0
-        i = 0
-        for s in samples:
-            if s > max:
-                max = s
-                bmax = i
-            if s < min:
-                min = s
-                bmin = i
-            i += 1
+
+        i_max = np.argmax(samples)
+        v_max = samples[i_max]
+        i_min = np.argmin(samples)
+        v_min = samples[i_min]
+
         span = 30000
-        print "wf samples %d bins %d..%d dB %.1f..%.1f kHz rbw %d kHz" % (nbins, min-255, max-255, span*bmin/bins, span*bmax/bins, span/bins)
+        bin_samples = bytearray(list(np.array(samples).astype(np.uint8)))
+        
+        self.f_wf.write(bin_samples)
+        print nbins, "wf samples %d bins %d..%d dB %.1f..%.1f kHz rbw %d kHz" % (nbins, v_min-255, v_max-255, span*i_min/bins, span*i_max/bins, span/bins)
 
     def _get_output_filename(self):
         ts  = time.strftime('%Y%m%dT%H%M%SZ', self._start_ts)
@@ -199,6 +201,14 @@ class KiwiWaterfallRecorder(kiwiclient.KiwiSDRStream):
             # TODO: something better than that
             samples.tofile(fp)
         self._update_wav_header()
+
+    def close(self):
+        try:
+            self._stream.close_connection()
+            self._socket.close()
+            self.f_wf.close()
+        except Exception as e:
+            print "exception: %s" % e
 
 
 class Worker(threading.Thread):
