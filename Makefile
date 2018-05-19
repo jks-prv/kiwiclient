@@ -1,6 +1,6 @@
 # DRM
 # UK
-HOST_DRM = southwest.ddns.net
+HOST_DRM = server.dns.org
 HOST_DRM_PORT = 8073
 FREQ_DRM = 3965
 

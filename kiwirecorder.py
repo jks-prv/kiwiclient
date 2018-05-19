@@ -142,7 +142,7 @@ class KiwiWaterfallRecorder(kiwiclient.KiwiSDRStream):
         self._num_channels = 2 if options.modulation == 'iq' else 1
         self._last_gps = dict(zip(['last_gps_solution', 'dummy', 'gpssec', 'gpsnsec'], [0,0,0,0]))
 
-        self.f_wf = open('waterfall.txt', 'wb')
+        self.f_wf = open('waterfall.data', 'wb')
 
 
     def _setup_rx_params(self):
@@ -167,7 +167,7 @@ class KiwiWaterfallRecorder(kiwiclient.KiwiSDRStream):
         bin_samples = bytearray(list(np.array(samples).astype(np.uint8)))
         
         self.f_wf.write(bin_samples)
-        print nbins, "wf samples %d bins %d..%d dB %.1f..%.1f kHz rbw %d kHz" % (nbins, v_min-255, v_max-255, span*i_min/bins, span*i_max/bins, span/bins)
+        print "wf samples %d bins %d..%d dB %.1f..%.1f kHz rbw %d kHz" % (nbins, v_min-255, v_max-255, span*i_min/bins, span*i_max/bins, span/bins)
 
     def _get_output_filename(self):
         ts  = time.strftime('%Y%m%dT%H%M%SZ', self._start_ts)
