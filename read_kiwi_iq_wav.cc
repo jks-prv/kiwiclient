@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <octave/oct.h>
+#include <octave/oct-map.h>
 
 class chunk_base {
 public:
@@ -74,43 +75,48 @@ DEFUN_DLD (read_kiwi_iq_wav, args, nargout, "[d,sample_rate]=read_kiwi_wav(\"<wa
       file.seekg(pos);
       file.read((char*)(&cr), sizeof(cr));
       if (cr.format() != "WAVE") {
-        // complain
+        error("'WAVE' chunk expected");
         break;
       }
+      const int n = (int(cr.size())-sizeof(chunk_riff)-4)/2074;
+      cell_z.resize(n);
+      cell_last.resize(n);
+      cell_gpssec.resize(n);
+      cell_gpsnsec.resize(n);
     } else if (c.id() == "fmt ") {
       file.seekg(pos);
       file.read((char*)(&fmt), sizeof(fmt));
       if (fmt.format() != 1 ||
           fmt.num_channels() != 2) {
-        // complain
+        error("unsupported WAVE format");
         break;
       }
-      retval(1) = octave_value(fmt.sample_rate());
+      retval(1) = fmt.sample_rate();
     } else if (c.id() == "data") {
-      ComplexNDArray a(dim_vector(c.size()/4, 1));
+      const int n = c.size()/4;
+      ComplexNDArray a(dim_vector(n, 1));
       int16_t i=0, q=0;
-      for (int j=0; j<c.size()/4 && file; ++j) {
+      for (int j=0; j<n && file; ++j) {
         file.read((char*)(&i), sizeof(i));
         file.read((char*)(&q), sizeof(q));
         a(j) = std::complex<double>(i/32768., q/32768.);
       }
-      cell_z(data_counter++) = octave_value(a);
+      cell_z(data_counter++) = a;
     } else if (c.id() == "kiwi") {
       file.seekg(pos);
       chunk_kiwi kiwi;
       file.read((char*)(&kiwi), sizeof(kiwi));
-      cell_last(data_counter)    = octave_value(kiwi.last());
-      cell_gpssec(data_counter)  = octave_value(kiwi.gpssec());
-      cell_gpsnsec(data_counter) = octave_value(kiwi.gpsnsec());
+      cell_last(data_counter)    = kiwi.last();
+      cell_gpssec(data_counter)  = kiwi.gpssec();
+      cell_gpsnsec(data_counter) = kiwi.gpsnsec();
     } else {
-      std::cout << "skipping unknown chunk " << c.id() << std::endl;
+      octave_stdout << "skipping unknown chunk " << c.id() << std::endl;
       pos = file.tellg();
       file.seekg(pos + c.size());
     }
   }
-
   octave_map map;
-  map.setfield("z",       cell_z);
+  map.setfield("z", cell_z);
   if (cell_last.length() == cell_z.length()) {
     map.setfield("gpslast", cell_last);
     map.setfield("gpssec",  cell_gpssec);

@@ -302,7 +302,7 @@ RADIOFAX_IOC576_START_TONE = 300
 RADIOFAX_IOC288_START_TONE = 675
 RADIOFAX_STOP_TONE = 450
 
-class KiwiFax(kiwiclient.KiwiSDRSoundStream):
+class KiwiFax(kiwiclient.KiwiSDRStream):
     def __init__(self, options):
         super(KiwiFax, self).__init__()
         self._options = options
@@ -368,8 +368,8 @@ class KiwiFax(kiwiclient.KiwiSDRSoundStream):
         # TODO: figure out proper AGC parameters
         self.set_agc(True)
         self.set_inactivity_timeout(0)
-        self.set_name('')
-        self.set_geo('Antarctica')
+        self.set_name('kiwifax.py')
+        # self.set_geo('Antarctica')
 
     def _on_sample_rate_change(self):
         sample_rate = float(self._sample_rate)
@@ -410,7 +410,7 @@ class KiwiFax(kiwiclient.KiwiSDRSoundStream):
         samples = self._iqconverter.process(samples)
         self._process_samples(seq, samples, rssi)
 
-    def _process_iq_samples(self, seq, samples, rssi):
+    def _process_iq_samples(self, seq, samples, rssi, gps):
         k = 1 / 32768.0
         samples = [ x * k for x in samples ]
         self._process_samples(seq, samples, rssi)
@@ -653,7 +653,7 @@ def main():
                       default='localhost', help='server host')
     parser.add_option('-p', '--server-port', '--server_port',
                       dest='server_port', type='int',
-                      default=8073, help='server port')
+                      default=8073, help='server port (default 8073)')
     parser.add_option('-q', '--iq',
                       dest='iq_mode',
                       action='store_true', default=False,
@@ -761,6 +761,7 @@ def main():
         except Exception as e:
             traceback.print_exc()
             break
+    print "exiting"
 
 
 if __name__ == '__main__':
