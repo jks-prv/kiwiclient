@@ -221,6 +221,9 @@ class KiwiSDRStream(KiwiSDRStreamBase):
                                     hc =  5000 if hc == None else hc
                                 else:
                                     raise KiwiUnknownModulation('"%s"' % mod)
+        if mod == 'cw':
+            # Compensate for the filter offset in CW mode
+            freq -= (lc + hc) / 2.0 / 1000.0
         self._send_message('SET mod=%s low_cut=%d high_cut=%d freq=%.3f' % (mod, lc, hc, freq))
 
     def set_agc(self, on=False, hang=False, thresh=-100, slope=6, decay=1000, gain=50):
