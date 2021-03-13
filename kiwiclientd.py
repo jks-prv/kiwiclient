@@ -144,26 +144,28 @@ class KiwiSoundRecorder(KiwiSDRStream):
 
         ##print gps['gpsnsec']-self._last_gps['gpsnsec']
         self._last_gps = gps
-        ## convert list of complex numbers into an array
-        s = np.zeros((len(samples),2), dtype=np.float32)
-        s[:,0] = np.real(samples).astype(np.float32) / 32768 # .astype(np.int16)
-        s[:,1] = np.imag(samples).astype(np.float32) / 32768 # .astype(np.int16)
-        if False and self._options.resample > 0:
+
+        if self._options.resample == 0 or HAS_RESAMPLER:
+            ## convert list of complex numbers into an array
+            s = np.ndarray((len(samples),2), dtype=np.float32)
+            s[:, 0] = np.real(samples).astype(np.float32) / 32768
+            s[:, 1] = np.imag(samples).astype(np.float32) / 32768
+
+        if self._options.resample > 0:
             if HAS_RESAMPLER:
                 ## libsamplerate resampling
                 if self._resampler is None:
                     self._resampler = Resampler(channels=2, converter_type='sinc_best')
-                s = self._resampler.process(s.reshape(len(samples),2), ratio=self._ratio)
-                s = np.round(s.flatten()).astype(np.int16)
+                s = self._resampler.process(s, ratio=self._ratio)
             else:
                 ## resampling by linear interpolation
                 n  = len(samples)
                 m  = int(round(n*self._ratio))
                 xa = np.arange(m)/self._ratio
                 xp = np.arange(n)
-                s  = np.zeros(2*m, dtype=np.int16)
-                s[:,0] = np.round(np.interp(xa,xp,np.real(samples))).astype(np.int16)
-                s[:,1] = np.round(np.interp(xa,xp,np.imag(samples))).astype(np.int16)
+                s  = np.ndarray((m,2), dtype=np.float32)
+                s[:, 0] = np.interp(xa, xp, np.real(samples)) / 32768
+                s[:, 1] = np.interp(xa, xp, np.imag(samples)) / 32768
 
         self._player.play(s)
 
