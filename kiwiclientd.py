@@ -66,10 +66,7 @@ class KiwiSoundRecorder(KiwiSDRStream):
         # pulseaudio has sporadic failures, retry a few times
         for i in range(0,10):
             try:
-                if self._modulation == 'iq':
-                    self._player = speaker.player(samplerate=rate, channels=[0, 1], blocksize=4096)
-                else:
-                    self._player = speaker.player(samplerate=rate, blocksize=4096)
+                self._player = speaker.player(samplerate=rate, blocksize=4096)
                 self._player.__enter__()
                 break
             except Exception as ex:
@@ -134,6 +131,10 @@ class KiwiSoundRecorder(KiwiSDRStream):
         self._player.play(fsamples)
 
     def _process_iq_samples(self, seq, samples, rssi, gps):
+        if self._options.quiet is False:
+            sys.stdout.write('\rBlock: %08x, RSSI: %6.1f' % (seq, rssi))
+            sys.stdout.flush()
+
         if self._squelch:
             is_open = self._squelch.process(seq, rssi)
             if not is_open:
@@ -144,11 +145,10 @@ class KiwiSoundRecorder(KiwiSDRStream):
         ##print gps['gpsnsec']-self._last_gps['gpsnsec']
         self._last_gps = gps
         ## convert list of complex numbers into an array
-        s = np.zeros(2*len(samples), dtype=np.float32)
-        s[0::2] = np.real(samples) #.astype(np.int16)
-        s[1::2] = np.imag(samples) #.astype(np.int16)
-
-        if self._options.resample > 0:
+        s = np.zeros((len(samples),2), dtype=np.float32)
+        s[:,0] = np.real(samples).astype(np.float32) / 32768 # .astype(np.int16)
+        s[:,1] = np.imag(samples).astype(np.float32) / 32768 # .astype(np.int16)
+        if False and self._options.resample > 0:
             if HAS_RESAMPLER:
                 ## libsamplerate resampling
                 if self._resampler is None:
@@ -162,9 +162,8 @@ class KiwiSoundRecorder(KiwiSDRStream):
                 xa = np.arange(m)/self._ratio
                 xp = np.arange(n)
                 s  = np.zeros(2*m, dtype=np.int16)
-                s[0::2] = np.round(np.interp(xa,xp,np.real(samples))).astype(np.int16)
-                s[1::2] = np.round(np.interp(xa,xp,np.imag(samples))).astype(np.int16)
-        s/= 32768
+                s[:,0] = np.round(np.interp(xa,xp,np.real(samples))).astype(np.int16)
+                s[:,1] = np.round(np.interp(xa,xp,np.imag(samples))).astype(np.int16)
 
         self._player.play(s)
 

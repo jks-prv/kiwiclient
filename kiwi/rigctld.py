@@ -104,7 +104,7 @@ class Rigctld(object):
             return "RPRT 0\n"
         except:
             return "RPRT -1\n"
-            
+
     def _set_frequency(self, command):
         try:
             # hamlib freq is in Hz, kiwisdr in kHz
@@ -199,10 +199,10 @@ class Rigctld(object):
             return "0\nVFOA\n"
         elif command.startswith('v'):
             return "VFOA\n"
-            
+
         print("Received unknown command: ", command)
         return "RPRT 0\n"
- 
+
     def run(self):
         # first accept a new connection, if there is any
         try:
@@ -214,7 +214,7 @@ class Rigctld(object):
 
         # check for incoming traffic on existing connections
         read_list = self._clientsockets
-        readable, writable, errored = select.select(read_list, [], [], 0)
+        readable, writable, errored = select.select(read_list, [], [], 0) if len(read_list) > 0 else ([],[],[])
 
         for s in errored:
             s.close()
