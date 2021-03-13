@@ -387,7 +387,7 @@ def main():
     group = OptionGroup(parser, "Rig control options", "")
     group.add_option('--rigctl', '--enable-rigctl',
                       dest='rigctl_enabled',
-                      default=True,
+                      default=False,
                       action='store_true',
                       help='Enable rigctld backend for frequency changes.')
     group.add_option('--rigctl-port', '--rigctl-port',
