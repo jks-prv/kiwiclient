@@ -66,7 +66,10 @@ class KiwiSoundRecorder(KiwiSDRStream):
         # pulseaudio has sporadic failures, retry a few times
         for i in range(0,10):
             try:
-                self._player = speaker.player(samplerate=rate, blocksize=4096)
+                if self._modulation == 'iq':
+                    self._player = speaker.player(samplerate=rate, channels=[0, 1], blocksize=4096)
+                else:
+                    self._player = speaker.player(samplerate=rate, blocksize=4096)
                 self._player.__enter__()
                 break
             except Exception as ex:
@@ -130,8 +133,48 @@ class KiwiSoundRecorder(KiwiSDRStream):
         fsamples /= 32768
         self._player.play(fsamples)
 
+    def _process_iq_samples(self, seq, samples, rssi, gps):
+        if self._squelch:
+            is_open = self._squelch.process(seq, rssi)
+            if not is_open:
+                self._start_ts = None
+                self._start_time = None
+                return
+
+        ##print gps['gpsnsec']-self._last_gps['gpsnsec']
+        self._last_gps = gps
+        ## convert list of complex numbers into an array
+        s = np.zeros(2*len(samples), dtype=np.float32)
+        s[0::2] = np.real(samples) #.astype(np.int16)
+        s[1::2] = np.imag(samples) #.astype(np.int16)
+
+        if self._options.resample > 0:
+            if HAS_RESAMPLER:
+                ## libsamplerate resampling
+                if self._resampler is None:
+                    self._resampler = Resampler(channels=2, converter_type='sinc_best')
+                s = self._resampler.process(s.reshape(len(samples),2), ratio=self._ratio)
+                s = np.round(s.flatten()).astype(np.int16)
+            else:
+                ## resampling by linear interpolation
+                n  = len(samples)
+                m  = int(round(n*self._ratio))
+                xa = np.arange(m)/self._ratio
+                xp = np.arange(n)
+                s  = np.zeros(2*m, dtype=np.int16)
+                s[0::2] = np.round(np.interp(xa,xp,np.real(samples))).astype(np.int16)
+                s[1::2] = np.round(np.interp(xa,xp,np.imag(samples))).astype(np.int16)
+        s/= 32768
+
+        self._player.play(s)
+
+        # no GPS or no recent GPS solution
+        last = gps['last_gps_solution']
+        if last == 255 or last == 254:
+            self._options.status = 3
+
     def _on_sample_rate_change(self):
-        if self._options.resample is 0:
+        if self._options.resample == 0:
             # if self._output_sample_rate == int(self._sample_rate):
             #    return
             # reinitialize player if the playback sample rate changed
@@ -349,7 +392,7 @@ def main():
                       help='Enable rigctld backend for frequency changes.')
     group.add_option('--rigctl-port', '--rigctl-port',
                       dest='rigctl_port',
-                      type='string', default='6400',
+                      type='string', default=[6400],
                       help='Port listening for rigctl commands (default 6400, can be comma separated list',
                       action='callback',
                       callback_args=(int,),
@@ -364,7 +407,7 @@ def main():
 
     ## clean up OptionParser which has cyclic references
     parser.destroy()
-    
+
     if options.krec_version:
         print('kiwiclientd v1.0')
         sys.exit()

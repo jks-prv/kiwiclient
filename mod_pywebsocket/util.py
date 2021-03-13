@@ -198,7 +198,7 @@ class RepeatedXorMasker(object):
     def _mask_using_array(self, s):
         """Perform the mask via python."""
         result = array.array('B')
-        result.fromstring(bytes(s))
+        result.frombytes(bytes(s))
 
         # Use temporary local variables to eliminate the cost to access
         # attributes
@@ -215,7 +215,7 @@ class RepeatedXorMasker(object):
 
         self._masking_key_index = masking_key_index
 
-        return result.tostring()
+        return result.tobytes()
 
     if 'fast_masking' in globals():
         mask = _mask_using_swig
