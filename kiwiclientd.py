@@ -130,6 +130,34 @@ class KiwiSoundRecorder(KiwiSDRStream):
         fsamples /= 32768
         self._player.play(fsamples)
 
+    def _process_iq_samples_raw(self, seq, data):
+        if self._options.quiet is False:
+            sys.stdout.write('\rBlock: %08x' % seq)
+            sys.stdout.flush()
+
+        n = len(data)//4
+
+        if self._options.resample == 0 or HAS_RESAMPLER:
+            ## convert bytes into an array
+            s = np.ndarray((n,2), dtype='>h', buffer=data).astype(np.float32) / 32768
+
+        if self._options.resample > 0:
+            if HAS_RESAMPLER:
+                ## libsamplerate resampling
+                if self._resampler is None:
+                    self._resampler = Resampler(channels=2, converter_type='sinc_best')
+                s = self._resampler.process(s, ratio=self._ratio)
+            else:
+                ## resampling by linear interpolation
+                m  = int(round(n*self._ratio))
+                xa = np.arange(m)/self._ratio
+                xp = np.arange(n)
+                s  = np.ndarray((m,2), dtype=np.float32)
+                s[:, 0] = np.interp(xa, xp, data[0::2]) / 32768
+                s[:, 1] = np.interp(xa, xp, data[1::2]) / 32768
+
+        self._player.play(s)
+
     def _process_iq_samples(self, seq, samples, rssi, gps):
         if self._options.quiet is False:
             sys.stdout.write('\rBlock: %08x, RSSI: %6.1f' % (seq, rssi))
@@ -360,6 +388,10 @@ def main():
                       dest='nb',
                       action='store_true', default=False,
                       help='Enable noise blanker with default parameters.')
+    group.add_option('--raw',
+                      dest='raw',
+                      action='store_true', default=False,
+                      help='Raw samples processing')
     group.add_option('--nb-gate',
                       dest='nb_gate',
                       type='int', default=100,
@@ -430,7 +462,6 @@ def main():
 
     options.sdt = 0
     options.dir = None
-    options.raw = False
     options.sound = True
     options.no_api = False
     options.tstamp = False

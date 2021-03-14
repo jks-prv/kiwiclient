@@ -221,28 +221,23 @@ class KiwiSDRStream(KiwiSDRStreamBase):
             if mod == 'am':
                 lc = -6000 if lc == None else lc
                 hc =  6000 if hc == None else hc
+            elif mod == 'lsb':
+                lc = -2700 if lc == None else lc
+                hc =  -300 if hc == None else hc
+            elif mod == 'usb':
+                lc =  300 if lc == None else lc
+                hc = 2700 if hc == None else hc
+            elif mod == 'cw':
+                lc = 300 if lc == None else lc
+                hc = 700 if hc == None else hc
+            elif mod == 'nbfm':
+                lc = -6000 if lc == None else lc
+                hc =  6000 if hc == None else hc
+            elif mod == 'iq':
+                lc = -5000 if lc == None else lc
+                hc =  5000 if hc == None else hc
             else:
-                if mod == 'lsb':
-                    lc = -2700 if lc == None else lc
-                    hc =  -300 if hc == None else hc
-                else:
-                    if mod == 'usb':
-                        lc =  300 if lc == None else lc
-                        hc = 2700 if hc == None else hc
-                    else:
-                        if mod == 'cw':
-                            lc = 300 if lc == None else lc
-                            hc = 700 if hc == None else hc
-                        else:
-                            if mod == 'nbfm':
-                                lc = -6000 if lc == None else lc
-                                hc =  6000 if hc == None else hc
-                            else:
-                                if mod == 'iq':
-                                    lc = -5000 if lc == None else lc
-                                    hc =  5000 if hc == None else hc
-                                else:
-                                    raise KiwiUnknownModulation('"%s"' % mod)
+                raise KiwiUnknownModulation('"%s"' % mod)
         self._send_message('SET mod=%s low_cut=%d high_cut=%d freq=%.3f' % (mod, lc, hc, freq))
         self._lowcut = lc
         self._highcut = hc
