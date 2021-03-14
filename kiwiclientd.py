@@ -38,6 +38,7 @@ class KiwiSoundRecorder(KiwiSDRStream):
         options.S_meter = False
         #logging.info("%s:%s freq=%d" % (options.server_host, options.server_port, freq))
         self._freq = freq
+        self._ifreq = options.ifreq
         self._modulation = self._options.modulation
         self._lowcut = self._options.lp_cut
         self._highcut = self._options.hp_cut
@@ -158,6 +159,9 @@ class KiwiSoundRecorder(KiwiSDRStream):
 
         self._player.play(s)
 
+    # phase for frequency shift
+    startph = np.float32(0)
+
     def _process_iq_samples(self, seq, samples, rssi, gps):
         if self._options.quiet is False:
             sys.stdout.write('\rBlock: %08x, RSSI: %6.1f' % (seq, rssi))
@@ -194,6 +198,20 @@ class KiwiSoundRecorder(KiwiSDRStream):
                 s  = np.ndarray((m,2), dtype=np.float32)
                 s[:, 0] = np.interp(xa, xp, np.real(samples)) / 32768
                 s[:, 1] = np.interp(xa, xp, np.imag(samples)) / 32768
+
+
+        if self._ifreq is not None and self._output_sample_rate >= 4 * self._ifreq:
+            # view as complex after possible resampling - no copying.
+            cs = s.view(dtype=np.complex64)
+            l = len(cs)
+            # get final phase value
+            stopph = self.startph + 2 * np.pi * l * self._ifreq / self._output_sample_rate
+            # all the steps needed
+            steps = -1j*np.linspace(self.startph, stopph, l, endpoint=False, dtype=np.float32)
+            # shift frequency and get back to a 2D array
+            s = (cs * np.exp(steps)[:, None]).view(np.float32)
+            # save phase  for next time, modulo 2π
+            self.startph = stopph % (2*np.pi)
 
         self._player.play(s)
 
@@ -392,6 +410,10 @@ def main():
                       dest='raw',
                       action='store_true', default=False,
                       help='Raw samples processing')
+    group.add_option('--if',
+                      dest='ifreq',
+                      type='float', default=None,
+                      help='Intermediate frequency, Hz. Default: no IF')
     group.add_option('--nb-gate',
                       dest='nb_gate',
                       type='int', default=100,
