@@ -104,6 +104,12 @@ class KiwiSoundRecorder(KiwiSDRStream):
             if not HAS_RESAMPLER:
                 logging.info("libsamplerate not available: linear interpolation is used for low-quality resampling. "
                              "(pip install samplerate)")
+        if self._ifreq is not None:
+            if self._modulation != 'iq':
+                logging.warning('Option --if %.1f only valid for IQ modulation, ignored' % self._ifreq)
+            elif self._output_sample_rate < self._ifreq * 4:
+                logging.warning('Sample rate %.1f is not enough for --if %.1f, ignored. Use --resample %.1f' % (
+                    self._output_sample_rate, self._ifreq, self._ifreq * 4))
         self._init_player()
 
     def _process_audio_samples(self, seq, samples, rssi):
@@ -164,7 +170,7 @@ class KiwiSoundRecorder(KiwiSDRStream):
             # get final phase value
             stopph = self.startph + 2 * np.pi * l * self._ifreq / self._output_sample_rate
             # all the steps needed
-            steps = -1j*np.linspace(self.startph, stopph, l, endpoint=False, dtype=np.float32)
+            steps = 1j*np.linspace(self.startph, stopph, l, endpoint=False, dtype=np.float32)
             # shift frequency and get back to a 2D array
             s = (cs * np.exp(steps)[:, None]).view(np.float32)
             # save phase  for next time, modulo 2π
