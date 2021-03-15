@@ -160,8 +160,8 @@ class KiwiSoundRecorder(KiwiSDRStream):
                 xa = np.arange(m)/self._ratio
                 xp = np.arange(n)
                 s  = np.ndarray((m,2), dtype=np.float32)
-                s[:, 0] = np.interp(xa, xp, data[0::2]) / 32768
-                s[:, 1] = np.interp(xa, xp, data[1::2]) / 32768
+                s[:, 0] = np.interp(xa, xp, data[0::2] / 32768)
+                s[:, 1] = np.interp(xa, xp, data[1::2] / 32768)
 
         if self._ifreq is not None and self._output_sample_rate >= 4 * self._ifreq:
             # view as complex after possible resampling - no copying.
@@ -215,8 +215,8 @@ class KiwiSoundRecorder(KiwiSDRStream):
                 xa = np.arange(m)/self._ratio
                 xp = np.arange(n)
                 s  = np.ndarray((m,2), dtype=np.float32)
-                s[:, 0] = np.interp(xa, xp, np.real(samples)) / 32768
-                s[:, 1] = np.interp(xa, xp, np.imag(samples)) / 32768
+                s[:, 0] = np.interp(xa, xp, np.real(samples) / 32768)
+                s[:, 1] = np.interp(xa, xp, np.imag(samples) / 32768)
 
 
         if self._ifreq is not None and self._output_sample_rate >= 4 * self._ifreq:
