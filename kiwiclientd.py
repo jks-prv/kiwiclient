@@ -215,8 +215,8 @@ class KiwiSoundRecorder(KiwiSDRStream):
                 xa = np.arange(m)/self._ratio
                 xp = np.arange(n)
                 s  = np.ndarray((m,2), dtype=np.float32)
-                s[:, 0] = np.interp(xa, xp, np.real(samples) / 32768)
-                s[:, 1] = np.interp(xa, xp, np.imag(samples) / 32768)
+                s[:, 0] = np.interp(xa, xp, np.real(samples).astype(np.float32) / 32768)
+                s[:, 1] = np.interp(xa, xp, np.imag(samples).astype(np.float32) / 32768)
 
 
         if self._ifreq is not None and self._output_sample_rate >= 4 * self._ifreq:
@@ -226,7 +226,7 @@ class KiwiSoundRecorder(KiwiSDRStream):
             # get final phase value
             stopph = self.startph + 2 * np.pi * l * self._ifreq / self._output_sample_rate
             # all the steps needed
-            steps = -1j*np.linspace(self.startph, stopph, l, endpoint=False, dtype=np.float32)
+            steps = 1j*np.linspace(self.startph, stopph, l, endpoint=False, dtype=np.float32)
             # shift frequency and get back to a 2D array
             s = (cs * np.exp(steps)[:, None]).view(np.float32)
             # save phase  for next time, modulo 2π
