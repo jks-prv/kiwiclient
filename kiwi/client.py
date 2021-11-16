@@ -441,7 +441,7 @@ class KiwiSDRStream(KiwiSDRStreamBase):
             gps = dict(zip(['last_gps_solution', 'dummy', 'gpssec', 'gpsnsec'], struct.unpack('<BBII', buffer(data[0:10]))))
             data = data[10:]
             if self._options.raw is True:
-                self._process_iq_samples_raw(seq, data)
+                self._process_iq_samples_raw(seq, data, rssi, gps)
             else:
                 count = len(data) // 2
                 samples = np.ndarray(count, dtype='>h', buffer=data).astype(np.float32)
@@ -469,7 +469,7 @@ class KiwiSDRStream(KiwiSDRStreamBase):
         data = body[12:]
         logging.info("W/F seq %d len %d" % (seq, len(data)))
         if self._options.raw is True:
-            return self._process_waterfall_samples_raw(data, seq)
+            return self._process_waterfall_samples_raw(data, seq, rssi)
         if self._compression:
             self._decoder.__init__()   # reset decoder each sample
             samples = self._decoder.decode(data)

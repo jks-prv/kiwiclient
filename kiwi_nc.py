@@ -126,7 +126,7 @@ class KiwiNetcat(KiwiSDRStream):
             s.extend(map(int, x))
         self._write_samples(s, gps)
 
-    def _process_waterfall_samples_raw(self, samples, seq):
+    def _process_waterfall_samples_raw(self, samples, seq, rssi):
         if self._options.progress is True:
             nbins = len(samples)
             bins = nbins-1
