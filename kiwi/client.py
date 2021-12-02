@@ -219,15 +219,15 @@ class KiwiSDRStream(KiwiSDRStreamBase):
         mod = mod.lower()
         self._modulation = mod
         if lc == None or hc == None:
-            if mod == 'am':
+            if mod == 'am' or mod == 'sam':
                 lc = -6000 if lc == None else lc
                 hc =  6000 if hc == None else hc
             else:
-                if mod == 'lsb':
+                if mod == 'lsb' or mod == 'sal':
                     lc = -2700 if lc == None else lc
                     hc =  -300 if hc == None else hc
                 else:
-                    if mod == 'usb':
+                    if mod == 'usb' or mod == 'sau':
                         lc =  300 if lc == None else lc
                         hc = 2700 if hc == None else hc
                     else:
