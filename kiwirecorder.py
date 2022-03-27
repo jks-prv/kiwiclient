@@ -167,13 +167,13 @@ class KiwiSoundRecorder(KiwiSDRStream):
         hp_cut = self._options.hp_cut
         if mod == 'am' or mod == 'amn':
             # For AM, ignore the low pass filter cutoff
-            lp_cut = -hp_cut if hp_cut is not None else hp_cut
+            lp_cut = -hp_cut
         if mod == 'lsb':
             # For LSB, transpose and invert the cutoffs
             lp_cut2 = -hp_cut
             hp_cut2 = -lp_cut
-            hp_cut = hp_cut2
             lp_cut = lp_cut2
+            hp_cut = hp_cut2
         self.set_mod(mod, lp_cut, hp_cut, self._freq)
 
     def _setup_rx_params(self):
