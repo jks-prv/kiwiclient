@@ -78,9 +78,10 @@ class KiwiSoundRecorder(KiwiSDRStream):
     def _setup_rx_params(self):
         self.set_name(self._options.user)
         lowcut = self._lowcut
+        highcut = self._highcut
         if self._modulation == 'am' or self._modulation == 'amn':
             # For AM, ignore the low pass filter cutoff
-            lowcut = -highcut if lowcut is not None else lowcut
+            lowcut = -highcut
         if self._modulation == 'lsb':
             # For LSB, transpose and invert the cutoffs
             lowcut2 = -highcut
