@@ -108,6 +108,12 @@ class KiwiNetcat(KiwiSDRStream):
             if mod == 'am':
                 # For AM, ignore the low pass filter cutoff
                 lp_cut = -hp_cut
+            if mod == 'lsb':
+                # For LSB, transpose and invert the cutoffs
+                lp_cut2 = -hp_cut
+                hp_cut2 = -lp_cut
+                hp_cut = hp_cut2
+                lp_cut = lp_cut2
             self.set_mod(mod, lp_cut, hp_cut, self._freq)
 
             if self._options.agc_gain != None: ## fixed gain (no AGC)
