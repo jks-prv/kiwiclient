@@ -81,6 +81,12 @@ class KiwiSoundRecorder(KiwiSDRStream):
         if self._modulation == 'am':
             # For AM, ignore the low pass filter cutoff
             lowcut = -self._highcut if lowcut is not None else lowcut
+        if mod == 'lsb':
+            # For LSB, transpose and invert the cutoffs
+            lp_cut2 = -hp_cut
+            hp_cut2 = -lp_cut
+            hp_cut = hp_cut2
+            lp_cut = lp_cut2
         self.set_mod(self._modulation, lowcut, self._highcut, self._freq)
         if self._options.agc_gain != None:
             self.set_agc(on=False, gain=self._options.agc_gain)
