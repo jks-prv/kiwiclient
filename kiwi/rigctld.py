@@ -117,7 +117,7 @@ class Rigctld(object):
                 newfreq = command[7:]
                 freq = float(newfreq) / 1000
             except:
-                print(f"could not decode frequency from {command}")
+                print("could not decode frequency from {command}")
                 return "RPRT -1\n"
 
         try:
