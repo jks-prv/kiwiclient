@@ -7,7 +7,7 @@ except ImportError:
 import struct
 import numpy as np
 try:
-    from chunkmuncher import Chunk # python 3.13+
+    from chunkmuncher import chunk # python 3.13+
 except ImportError:
     from chunk import Chunk
 
