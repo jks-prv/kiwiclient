@@ -6,7 +6,10 @@ except ImportError:
     import collections as collectionsAbc
 import struct
 import numpy as np
-from chunk import Chunk
+try:
+    from chunkmuncher import Chunk # python 3.13+
+except ImportError:
+    from chunk import Chunk
 
 class KiwiIQWavError(Exception):
     pass

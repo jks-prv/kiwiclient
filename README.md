@@ -1,4 +1,4 @@
-[updated 18 August 2024]
+[updated 16 December 2024]
 
 # KiwiClient
 
@@ -27,6 +27,8 @@ It is strongly recommended you use Python3.
 Make sure the Python package `'numpy'` is installed.  
 On many Linux distributions the command would be similar to `'apt install python3-numpy'`  
 On macOS try `'pip3 install numpy'` or perhaps `'python3 -m pip install numpy'`
+
+Same for package `'chunkmuncher'` if using Python3.13 or later (as module `'chunk'` was removed in 3.13)
 
 ## Resampling
 

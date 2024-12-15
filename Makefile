@@ -3,6 +3,8 @@
 #
 
 PY = python3
+#PY = python3.13
+#PY = python3.12
 
 # set global environment variables KIWI_HOST and KIWI_PORT to the Kiwi you want to work with
 ifeq ($(KIWI_HOST)x,x)
