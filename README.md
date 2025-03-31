@@ -1,10 +1,10 @@
-[updated 16 December 2024]
+[updated 1 April 2025]
 
 # KiwiClient
 
 This is a Python client for KiwiSDR. It allows you to:
 
-* Receive data streams with audio samples, IQ samples, and waterfall data
+* Receive data streams with audio samples, IQ samples, S-meter and waterfall data
 * Issue commands to the KiwiSDR
 
 ## Install
@@ -19,6 +19,7 @@ Here you will find a `'Makefile'` containing various usage examples.
 Assuming your system has `'Make'` and `'Python3'` installed type `'make help'` to get started.  
 Or without `'Make'` type `'python3 kiwirecorder.py --help'`  
 It is also possible to use the `'git'` tools to checkout a kiwiclient clone that is easier to keep updated.  
+For example `'git clone https://github.com/jks-prv/kiwiclient.git'`  
 
 ## Dependencies
 
@@ -34,7 +35,7 @@ Same for package `'chunkmuncher'` if using Python3.13 or later (as module `'chun
 
 If you want high-quality resampling based on libsamplerate (SRC) you should build the version
 included with KiwiClient that has fixes rather than using the standard python-samplerate package.  
-Follow these steps. Ask on the Kiwi forum if you have problems: `'forum.kiwisdr.com'`
+Follow these steps. Ask on the Kiwi forum if you have problems: [forum.kiwisdr.com](https://forum.kiwisdr.com)
 * Install the Python package `'cffi'`
 * Install the `'libsamplerate'` library using your system's package manager.
 Note: this is not the Python package `'samplerate'` but the native code library `'libsamplerate'`
@@ -74,7 +75,7 @@ The SNR ratio (a la Pierre Ynard) is computed each time.
 There is now the possibility to change zoom level and offset frequency.
 
 * `microkiwi_waterfall.py`: launch this program with no filename and just the SNR will be computed, with a filename, the raw waterfall data is saved. Launch with `--help` to list all options.
-* `waterfall_data_analysis.ipynb`: this is a demo jupyther notebook to interactively analyze waterfall data. Easily transformable into a standalone python program.
+* `waterfall_data_analysis.ipynb`: this is a demo jupyter notebook to interactively analyze waterfall data. Easily transformable into a standalone python program.
 
 The data is, at the moment, transferred in uncompressed format.
 
