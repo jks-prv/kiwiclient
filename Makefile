@@ -515,11 +515,10 @@ nc:
 	$(KREC) --nc $(H_NC) -m usb -f $(HFDL_FREQ) --progress --tlimit=25 --log=debug --nolocal
 #	$(KREC) --nc $(H_NC) -m usb -f $(HFDL_FREQ) --progress --tlimit=25 --log=debug --nolocal
 #	$(KREC) --nc $(H_NC) -m usb -f $(HFDL_FREQ) --progress --tlimit=25 --log=debug --nolocal -u foo
-#	$(KREC) --nc $(H_NC) -m cw -f $(HFDL_FREQ) --progress --tlimit=3 --log=debug --waterfall
+#	$(KREC) --nc $(H_NC) -m cw -f $(HFDL_FREQ) --progress --tlimit=3 --log=debug --wf
 
-kr_nc:
-	$(KREC) --nc $(H_NC) -m cw -f $(HFDL_FREQ) --progress --tlimit=3 --log=debug
-#	$(KREC) --nc $(H_NC) -m cw -f $(HFDL_FREQ) --progress --tlimit=3 --log=debug --waterfall -z 7
+wf-nc:
+	$(KREC) --wf $(HP) -f 15000 -z 0 --log_level info -u krec-WF --tlimit=5 --nq --progress --nc >wf.nc
 
 # Use of an HFDL-optimized passband (e.g. "-L 300 -H 2600") is not necessary here
 # since dumphfdl does its own filtering. However the Kiwi HFDL extension does have it so you
@@ -581,7 +580,7 @@ help h:
 	$(KREC) --help
 
 clean:
-	-rm -f *.log *.wav *.png *.txt *.npy
+	-rm -f *.log *.wav *.png *.txt *.npy *.nc
 
 clean_dist: clean
 	-rm -f *.pyc */*.pyc oct/*.oct

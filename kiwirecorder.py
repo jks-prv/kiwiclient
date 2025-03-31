@@ -691,25 +691,23 @@ class KiwiNetcat(KiwiSDRStream):
 
     def _process_audio_samples_raw(self, seq, samples, rssi):
         if self._options.progress is True:
-            sys.stdout.write('\rBlock: %08x, RSSI: %6.1f' % (seq, rssi))
-            sys.stdout.flush()
-        else:
-            if self._squelch:
-                is_open = self._squelch.process(seq, rssi)
-                if not is_open:
-                    self._start_ts = None
-                    self._start_time = None
-                    return
-            self._write_samples(samples, {})
+            sys.stderr.write('\rBlock: %08x, RSSI: %6.1f' % (seq, rssi))
+            sys.stderr.flush()
+        if self._squelch:
+            is_open = self._squelch.process(seq, rssi)
+            if not is_open:
+                self._start_ts = None
+                self._start_time = None
+                return
+        self._write_samples(samples, {})
 
     def _process_iq_samples_raw(self, seq, data):
         if self._options.progress is True:
-            sys.stdout.write('\rBlock: %08x, RSSI: %6.1f' % (seq, rssi))
-            sys.stdout.flush()
-        else:
-            count = len(data) // 2
-            samples = np.ndarray(count, dtype='>h', buffer=data).astype(np.int16)
-            self._write_samples(samples, {})
+            sys.stderr.write('\rBlock: %08x, RSSI: %6.1f' % (seq, rssi))
+            sys.stderr.flush()
+        count = len(data) // 2
+        samples = np.ndarray(count, dtype='>h', buffer=data).astype(np.int16)
+        self._write_samples(samples, {})
 
     def _process_waterfall_samples_raw(self, samples, seq):
         if self._options.progress is True:
@@ -728,12 +726,11 @@ class KiwiNetcat(KiwiSDRStream):
                     bmin = i
                 i += 1
             span = 30000
-            sys.stdout.write('\rwf samples %d bins %d..%d dB %.1f..%.1f kHz rbw %d kHz'
+            sys.stderr.write('\rwf samples %d bins %d..%d dB %.1f..%.1f kHz rbw %d kHz'
                   % (nbins, min-255, max-255, span*bmin/bins, span*bmax/bins, span/bins))
-            sys.stdout.flush()
-        else:
-            self._fp_stdout.write(samples)
-            self._fp_stdout.flush()
+            sys.stderr.flush()
+        self._fp_stdout.write(samples)
+        self._fp_stdout.flush()
 
     def _write_samples(self, samples, *args):
         if self._options.progress is True:
