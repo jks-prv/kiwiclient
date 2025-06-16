@@ -132,7 +132,7 @@ class KiwiNetcat(KiwiSDRStream):
             self._set_wf_comp(False)
             self._set_wf_speed(1)   # 1 Hz update
 
-    def _process_audio_samples_raw(self, seq, samples, rssi):
+    def _process_mono_samples_raw(self, seq, samples, rssi):
         if self._options.progress is True:
             sys.stdout.write('\rBlock: %08x, RSSI: %6.1f' % (seq, rssi))
             sys.stdout.flush()
@@ -145,12 +145,12 @@ class KiwiNetcat(KiwiSDRStream):
                     return
             self._write_samples(samples, {})
 
-    def _process_iq_samples_raw(self, seq, data):
+    def _process_stereo_samples_raw(self, seq, data):
         count = len(data) // 2
         samples = np.ndarray(count, dtype='>h', buffer=data).astype(np.int16)
         self._write_samples(samples, {})
 
-    def _process_waterfall_samples_raw(self, samples, seq):
+    def _process_waterfall_samples_raw(self, seq, samples):
         if self._options.progress is True:
             nbins = len(samples)
             bins = nbins-1
@@ -377,6 +377,7 @@ def main():
 
     FORMAT = '%(asctime)-15s pid %(process)5d %(message)s'
     logging.basicConfig(level=logging.getLevelName(options.log_level.upper()), format=FORMAT)
+    logging.warning("kiwi_nc is deprecated. Consider using the '--netcat' option of kiwirecorder.")
     if options.gc_stats:
         gc.set_debug(gc.DEBUG_SAVEALL | gc.DEBUG_LEAK | gc.DEBUG_UNCOLLECTABLE)
 
@@ -401,7 +402,7 @@ def main():
             logging.fatal(e)
             return
 
-    options.raw = True
+    options.netcat = True
     options.S_meter = -1
     options.ADC_OV = None
     options.is_kiwi_tdoa = False
@@ -417,11 +418,11 @@ def main():
     for i,opt in enumerate(options):
         opt.multiple_connections = multiple_connections
         opt.idx = 0
-        nc_inst.append(KiwiWorker(args=(KiwiNetcat(opt, True),opt,run_event)))
+        nc_inst.append(KiwiWorker(args=(KiwiNetcat(opt, True),opt,False,run_event)))
         if gopt.admin:
             opt.writer_init = False
             opt.idx = 1
-            nc_inst.append(KiwiWorker(args=(KiwiNetcat(opt, False),opt,run_event)))
+            nc_inst.append(KiwiWorker(args=(KiwiNetcat(opt, False),opt,False,run_event)))
 
     try:
         for i,r in enumerate(nc_inst):

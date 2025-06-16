@@ -1,0 +1,7 @@
+Scan:
+ threshold:  20 # dB
+ wait:        1 # seconds
+ dwell:       6 # seconds
+# frequencies: [6661, 6559, 6311, 8948, 8912] # kHz, HFDL
+ frequencies: [4024, 4030, 4039] # kHz, STANAG-4539 bursts
+ pbc:         true

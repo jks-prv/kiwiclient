@@ -1,8 +1,8 @@
-[updated 1 April 2025]
+[updated 14 June 2025]
 
 # KiwiClient
 
-This is a Python client for KiwiSDR. It allows you to:
+This is the version v1.5 Python client for KiwiSDR. It allows you to:
 
 * Receive data streams with audio samples, IQ samples, S-meter and waterfall data
 * Issue commands to the KiwiSDR
@@ -23,7 +23,7 @@ For example `'git clone https://github.com/jks-prv/kiwiclient.git'`
 
 ## Dependencies
 
-It is strongly recommended you use Python3.
+Python3 is required.
 
 Make sure the Python package `'numpy'` is installed.  
 On many Linux distributions the command would be similar to `'apt install python3-numpy'`  
@@ -81,6 +81,21 @@ The data is, at the moment, transferred in uncompressed format.
 
 ## Guide to the code
 
+### kiwirecorder.py
+* Can record audio data, IQ samples, and waterfall data.
+* The complete list of options can be obtained by `python3 kiwirecorder.py --help` or `make help`.
+* It is possible to record from more than one KiwiSDR simultaneously, see again `--help`.
+* For recording IQ samples there is the `-w` or `--kiwi-wav` option: this writes a .wav file  
+which includes GNSS timestamps (see below).
+* The `--netcat` option can stream raw or .wav-formatted samples to standard output.
+* Kiwirecorder can "camp" onto an existing KiwiSDR audio channel. See the `--camp-chan` option.
+* AGC options can be specified in a YAML-formatted file, `--agc-yaml` option, see `default_agc.yaml`.
+* Scanning options (with optional squelch) can be specified in a YAML-formatted file, `--scan-yaml` option.  
+See the file `SCANNING` for detailed info.
+* Note the above YAML options need PyYAML to be installed.
+* See the `Makefile` for many usage examples.
+* Ask on the KiwiSDR Forum for help: [forum.kiwisdr.com](https://forum.kiwisdr.com)
+
 ### kiwiclient.py
 
 Base class for receiving websocket data from a KiwiSDR.
@@ -89,13 +104,6 @@ It provides the following methods which can be used in derived classes:
 * `_process_audio_samples(self, seq, samples, rssi)`: audio samples
 * `_process_iq_samples(self, seq, samples, rssi, gps)`: IQ samples
 * `_process_waterfall_samples(self, seq, samples)`: waterfall data
-
-### kiwirecorder.py
-* Can record audio data, IQ samples, and waterfall data.
-* The complete list of options can be obtained by `python3 kiwirecorder.py --help`.
-* It is possible to record from more than one KiwiSDR simultaneously, see again `--help`.
-* For recording IQ samples there is the `-w` or `--kiwi-wav` option: this writes a .wav file which includes GNSS timestamps (see below).
-* AGC options can be specified in a YAML-formatted file, `--agc-yaml` option, see `default_agc.yaml`. Note that this option needs PyYAML to be installed
 
 ## IQ .wav files with GNSS timestamps
 ### kiwirecorder.py configuration

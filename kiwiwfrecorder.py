@@ -214,24 +214,24 @@ def main():
     opt.tlimit = None
     opt.no_api = True
     opt.nolocal = False
-    opt.raw = False
     opt.S_meter = -1
     opt.ADC_OV = None
     opt.freq_pbc = None
     opt.wf_cal = None
+    opt.netcat = False
     opt.wideband = False
 
     FORMAT = '%(asctime)-15s pid %(process)5d %(message)s'
     logging.basicConfig(level=logging.getLevelName(opt.log_level.upper()), format=FORMAT)
-    if opt.log_level.upper() == 'DEBUG':
-        gc.set_debug(gc.DEBUG_SAVEALL | gc.DEBUG_LEAK | gc.DEBUG_UNCOLLECTABLE)
+    #if opt.log_level.upper() == 'DEBUG':
+    #    gc.set_debug(gc.DEBUG_SAVEALL | gc.DEBUG_LEAK | gc.DEBUG_UNCOLLECTABLE)
 
     run_event = threading.Event()
     run_event.set()
 
     snd_queue,wf_queue = [Queue(),Queue()]
-    snd_recorder = KiwiWorker(args=(KiwiSoundRecorder    (opt, snd_queue), opt, run_event))
-    wf_recorder  = KiwiWorker(args=(KiwiWaterfallRecorder(opt, wf_queue),  opt, run_event))
+    snd_recorder = KiwiWorker(args=(KiwiSoundRecorder    (opt, snd_queue), opt, False, run_event))
+    wf_recorder  = KiwiWorker(args=(KiwiWaterfallRecorder(opt, wf_queue),  opt, False, run_event))
     consumer     = Consumer(args=(opt,snd_queue,wf_queue,run_event))
 
     threads = [snd_recorder, wf_recorder, consumer]
@@ -262,7 +262,7 @@ def main():
         join_threads(threads)
         print("Exception: threads successfully closed")
 
-    logging.debug('gc %s' % gc.garbage)
+    #logging.debug('gc %s' % gc.garbage)
 
 if __name__ == '__main__':
     #import faulthandler

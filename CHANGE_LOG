@@ -1,0 +1,22 @@
+CHANGE_LOG
+
+For the Github commit log see here: github.com/jks-prv/kiwiclient/commits/master
+
+v1.5  June 15, 2025
+    Added continuous frequency scanning capability.
+        Kiwirecorder previously had a squelch-based scanning function using parameters specified
+        with a YAML file and the --scan-yaml option. A set of frequencies would be scanned and the
+        scanning stopped when the squelch opened. Continuous scanning will now occur if the
+        "threshold" parameter is not given in the YAML file. The existing "wait" and "dwell" ...
+        
+        Note that the former example file scan.yaml has been renamed to scan_squelch.yaml to
+        distinguish it from the new example file scan_continuous.yaml used in frequency scanning.
+    
+    Added Kiwi channel camping feature.
+        ...
+        Note that camping does not currently support resampling, squelch or GPS timestamps.
+
+    Netcat function:
+    
+    Squelch function:
+        Made tail timing correct for the various audio modes: mono/stereo, compression/no-compression.

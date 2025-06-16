@@ -1,0 +1,100 @@
+[updated 17 June 2025]
+
+A discussion and examples of the kiwirecorder scanning and squelch capabilities.
+
+Please refer to example invocations in the Makefile.
+Search for the "# squelch" and "# scanning" sections of the Makefile.
+See also the README.md file for general information about kiwiclient / kiwirecorder.
+
+Because a list of frequencies associated with scanning might be extensive, and would otherwise
+cause the command line invocation of kiwirecorder to become unwieldy, a separate YAML-formatted file
+is used to store scanning parameters. In the Makefile this can be seen as:
+
+    --scan-yaml scan_squelch.yaml
+    --scan-yaml scan_continuous.yaml
+
+The example scan_squelch.yaml file contains:
+    Scan:
+     threshold:  20 # dB
+     wait:        1 # seconds
+     dwell:       6 # seconds
+    # frequencies: [6661, 6559, 6311, 8948, 8912] # kHz, HFDL
+     frequencies: [4024, 4030, 4039] # kHz, STANAG-4539 bursts
+     pbc:         true
+
+Whereas the example scan_continuous.yaml contains:
+    Scan:
+     wait:        1 # seconds
+     dwell:       5 # seconds
+     frequencies: [2500, 3330, 5000, 7850, 10000, 14670, 15000, 20000] # kHz, time stations
+
+The presence of the "threshold" parameter distinguishes a squelching scan from a continuous scan.
+The "#" character precedes a comment.
+
+A squelching scan works as follows. Kiwirecorder maintains a continuous measurement of the signal
+level over time by averaging readings from the S-meter transmitted along with the received audio.
+When the signal level on a frequency channel exceeds the threshold the scan stops and a few file
+begins recording. When the level drops below the threshold the file is closed and scanning resumes.
+
+The "wait" time is applied after tuning to the next entry in the frequency list and delays detection
+of the signal and possible start of the file recording. "dwell" is the amount of time the scan will
+remain on the frequency before moving on to the next one if no signal is detected. The parameter
+"--squelch-tail=(secs, default=1)" on the command line (not in the YAML file) determines how long
+the recording continues after the signal falls below the threshold.
+
+Without a threshold parameter the scan becomes continuous. Recording a file for the dwell time on
+each frequency in turn, independent of any signal level.
+
+When discussing receive frequencies there is always the question of carrier/dial frequency versus
+passband center frequency. This is only a consideration for passbands that are not symmetrical
+around 0 Hz. That is, sideband/CW modes compared to the AM/SAM modes. Although note that you can
+always adjust the passband in any mode to be anything you want. So it could change from symmetrical
+to asymmetrical. IQ mode is sometimes setup both ways.
+
+Sometimes a signal is centered on a round number, and if you want to record it in USB (an
+assymetrical passband) then it would be nice to specify these round numbered values in the frequency
+lists. Instead of mentally subtracting half the passband offset to get the carrier/dial frequency to
+enter into the list. That's when you can use the "pbc: true" entry in the YAML file (or the "--pbc"
+parameter on the command line). This means the frequency specified is to be interpreted as a
+passband center frequency. And the actual carrier/dial frequency is equal to freq - pbc.
+
+In the scan_squelch.yaml file above the HFDL and STANAG-4539 frequencies are the center of the
+signal as seen on the waterfall display (e.g. 4030 kHz). So the "pbc" parameter is used to allow
+4030 to be specified in the frequency list instead of 4028.5 = 4030 - 1.5 kHz, since 1.5 kHz is the
+center of the default USB passband of 300 - 2700 Hz (300 + (2700-300)/2 = 1500).
+
+In the scan_continuous.yaml file all the time station freqnecies are carrier/dial frequencies
+since AM mode is used. So the "pbc: true" and "--pbc" parameters are not used.
+
+Hint: If you hold down the keyboard "shift" key while mousing around the waterfall display the
+frequency at the cursor center will be displayed. This is helpful to understand the exact
+frequencies of the passband edges.
+
+Sample output of kiwirecorder using the example scan_continuous.yaml file via running "make scan":
+
+>>> make clean; make scan
+rm -f *.log *.wav *.png *.txt *.npy *.nc
+python3 -u kiwirecorder.py -s wessex.zapto.org -p 8074 --log_level=info -m amn --scan-yaml=scan_continuous.yaml
+2025-06-17 09:26:20,576 pid 21197 started sound recorder 0
+2025-06-17 09:26:22,159 pid 21197 Kiwi server version: 1.813
+2025-06-17 09:26:22,519 pid 21197 GNSS position: lat,lon=[+50.74,   -2.64]
+2025-06-17 09:26:23,702 pid 21197 GNSS position: lat,lon=[+50.74,   -2.64]
+  Median: -103.2 Thr: -109.2 S Scan: 21:26:34 S DWELL 2500 kHz      2025-06-17 09:26:34,954 pid 21197 Started a new file: 20250616T212634Z_2500000_amn.wav
+Block: 00000065, RSSI:  -76.2  Scan: 21:26:41 S DWELL 3330 kHz      2025-06-17 09:26:41,125 pid 21197 Started a new file: 20250616T212641Z_3330000_amn.wav
+Block: 00000089, RSSI:  -88.7  Scan: 21:26:47 S DWELL 5000 kHz      2025-06-17 09:26:47,239 pid 21197 Started a new file: 20250616T212647Z_5000000_amn.wav
+Block: 000000ae, RSSI:  -98.5  Scan: 21:26:53 S DWELL 7850 kHz      2025-06-17 09:26:53,583 pid 21197 Started a new file: 20250616T212653Z_7850000_amn.wav
+Block: 000000d2, RSSI:  -84.8  Scan: 21:26:59 S DWELL 10000 kHz      2025-06-17 09:26:59,707 pid 21197 Started a new file: 20250616T212659Z_10000000_amn.wav
+Block: 000000f6, RSSI: -107.7  Scan: 21:27:05 S DWELL 14670 kHz      2025-06-17 09:27:05,816 pid 21197 Started a new file: 20250616T212705Z_14670000_amn.wav
+Block: 0000011a, RSSI: -106.0  Scan: 21:27:11 S DWELL 15000 kHz      2025-06-17 09:27:11,882 pid 21197 Started a new file: 20250616T212711Z_15000000_amn.wav
+Block: 0000013d, RSSI: -114.0  Scan: 21:27:17 S DWELL 20000 kHz      2025-06-17 09:27:17,935 pid 21197 Started a new file: 20250616T212717Z_20000000_amn.wav
+Block: 00000162, RSSI: -103.3  Scan: 21:27:24 S DWELL 2500 kHz      2025-06-17 09:27:24,256 pid 21197 Started a new file: 20250616T212724Z_2500000_amn.wav
+^C
+Block: 00000177, RSSI: -103.0  Scan: 21:27:27 S DWELL 2500 kHz      KeyboardInterrupt: threads successfully closed
+>>> 
+
+Try "make scan-sq" to scan with squelching via --scan-yaml=scan_squelch.yaml
+To see how squelch alone works without frequency scanning try "make sq".
+
+Less logging info will be shown if the "--log_level=info" parameter is removed.
+
+[end-of-document]

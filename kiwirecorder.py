@@ -3,9 +3,11 @@
 
 ##
 ## FIXME:
-## netcat should support the usual suspects:
-##      IQ-swap, endian-reversal, option to include GPS data, ...
+## netcat and camping should support the usual suspects:
+##      IQ-swap, endian-reversal, option to include GPS data, squelch, resampling ...
 ##
+
+VERSION = 'v1.5'
 
 import array, logging, os, struct, sys, time, copy, threading, os
 import gc
@@ -21,10 +23,10 @@ from optparse import OptionGroup
 
 HAS_PyYAML = True
 try:
-    ## needed for the --agc-yaml option
+    ## needed for the --agc-yaml and --scan-yaml options
     import yaml
     if yaml.__version__.split('.')[0] < '5':
-        print('wrong PyYAML version: %s < 5; PyYAML is only needed when using the --agc-yaml option' % yaml.__version__)
+        print('wrong PyYAML version: %s < 5; PyYAML is only needed when using the --agc-yaml or --scan-yaml option' % yaml.__version__)
         raise ImportError
 except ImportError:
     ## (only) when needed an exception is raised, see below
@@ -54,13 +56,101 @@ def clamp(x, xmin, xmax):
 def by_dBm(e):
     return e['dBm']
 
-def _write_wav_header(fp, filesize, samplerate, num_channels, is_kiwi_wav):
+def _init_common(self, options, type):
+    self._options = options
+    self._type = type
+    freq = options.frequency
+    #logging.info("%s:%s freq=%d" % (options.server_host, options.server_port, freq))
+    self._freq = freq
+    self._freq_offset = options.freq_offset
+    self._start_ts = None
+    self._start_time = None
+
+    self._squelch = Squelch(options) if options.sq_thresh is not None or options.scan_yaml is not None else None
+    self._scan_continuous = False
+    if options.scan_yaml is not None:
+        if 'threshold' in options.scan_yaml:
+            threshold = options.scan_yaml['threshold']
+        else:
+            self._scan_continuous = True
+            threshold = 0
+        self._squelch = [Squelch(options).set_threshold(threshold) for _ in range(len(options.scan_yaml['frequencies']))]
+        if 'pbc' in options.scan_yaml:
+            self._options.freq_pbc = options.scan_yaml['pbc']
+            logging.info('YAML file: --pbc')
+
+    self._last_gps = dict(zip(['last_gps_solution', 'dummy', 'gpssec', 'gpsnsec'], [0,0,0,0]))
+    self._resampler = None
+    self._kiwi_samplerate = False
+    self._gnss_performance = GNSSPerformance()
+    self._camp_chan = options.camp_chan
+
+def _setup_rx_snd_params(self, user):
+    if self._options.no_api:
+        self._setup_no_api()
+        return
+    
+    self.set_name(self._options.user)
+
+    self.set_freq(self._freq)
+
+    if self._options.agc_gain != None: ## fixed gain (no AGC)
+        self.set_agc(on=False, gain=self._options.agc_gain)
+    elif self._options.agc_yaml_file != None: ## custon AGC parameters from YAML file
+        self.set_agc(**self._options.agc_yaml)
+    else: ## default is AGC ON (with default parameters)
+        self.set_agc(on=True)
+
+    if self._options.compression is False:
+        self._set_snd_comp(False)
+
+    if self._options.nb is True or self._options.nb_test is True:
+        gate = self._options.nb_gate
+        if gate < 100 or gate > 5000:
+            gate = 100
+        nb_thresh = self._options.nb_thresh
+        if nb_thresh < 0 or nb_thresh > 100:
+            nb_thresh = 50
+        self.set_noise_blanker(gate, nb_thresh)
+
+    if self._options.de_emp is True:
+        self.set_de_emp(1)
+
+    self._output_sample_rate = self._sample_rate
+
+    if self._squelch:
+        if type(self._squelch) == list: ## scan mode
+            for s in self._squelch:
+                s.set_sample_rate(self._sample_rate, not self._compression or self._stereo)
+        else:
+            self._squelch.set_sample_rate(self._sample_rate, not self._compression or self._stereo)
+
+    if self._options.test_mode:
+        self._set_stats()
+
+    if self._options.resample > 0 and not HAS_RESAMPLER:
+        self._setup_resampler()
+
+    if self._options.devel is not None:
+        for pair in self._options.devel.split(','):
+            vals = pair.split(':')
+            if len(vals) != 2:
+                raise Exception("--devel arg \"%s\" needs to be format \"[0-7]:float_value\"" % pair)
+            which = int(vals[0])
+            value = float(vals[1])
+            if not (0 <= which <= 7):
+                raise Exception("--devel first arg \"%d\" of \"[0-7]:float_value\" is out of range" % which)
+            self._send_message('SET devl.p%d=%.9g' % (which, value))
+
+def _write_wav_header(self, fp, filesize, samplerate, num_channels, is_kiwi_wav):
+    # always 2-channels if camping because can't predict what camped channel will do (mono vs stereo)
+    nchans = 2 if self._camping else num_channels
     samplerate = int(samplerate+0.5)
     fp.write(struct.pack('<4sI4s', b'RIFF', filesize - 8, b'WAVE'))
     bits_per_sample = 16
-    byte_rate       = samplerate * num_channels * bits_per_sample // 8
-    block_align     = num_channels * bits_per_sample // 8
-    fp.write(struct.pack('<4sIHHIIHH', b'fmt ', 16, 1, num_channels, samplerate, byte_rate, block_align, bits_per_sample))
+    byte_rate       = samplerate * nchans * bits_per_sample // 8
+    block_align     = nchans * bits_per_sample // 8
+    fp.write(struct.pack('<4sIHHIIHH', b'fmt ', 16, 1, nchans, samplerate, byte_rate, block_align, bits_per_sample))
     if not is_kiwi_wav:
         fp.write(struct.pack('<4sI', b'data', filesize - 12 - 8 - 16 - 8))
 
@@ -123,25 +213,27 @@ class GNSSPerformance(object):
 
 class Squelch(object):
     def __init__(self, options):
+        self._options  = options
         self._status_msg  = not options.quiet
         self._threshold   = options.sq_thresh
         self._squelch_tail = options.squelch_tail ## in seconds
         self._ring_buffer = RingBuffer(65)
         self._squelch_on_seq = None
-        self.set_sample_rate(12000.0) ## default setting
+        self.set_sample_rate(12000.0, False) ## default setting
 
     def set_threshold(self, threshold):
         self._threshold = threshold
         return self
 
-    def set_sample_rate(self, fs):
-        self._tail_delay  = round(self._squelch_tail*fs/512) ## seconds to number of buffers
+    def set_sample_rate(self, fs, not_comp_or_stereo):
+        bsize = 512 if not_comp_or_stereo else 2048
+        self._tail_delay  = round(self._squelch_tail*fs/bsize) ## seconds to number of buffers
 
     def process(self, seq, rssi):
         if not self._ring_buffer.is_filled() or self._squelch_on_seq is None:
             self._ring_buffer.insert(rssi)
-        if not self._ring_buffer.is_filled():
-            return False
+            if self._ring_buffer.is_filled() and self._options.scan_yaml_file and self._options.scan_state == 'INIT':
+                self._options.scan_state = 'WAIT'
         median_nf   = self._ring_buffer.applyFn(np.median)
         rssi_thresh = median_nf + self._threshold
         is_open     = self._squelch_on_seq is not None
@@ -152,13 +244,17 @@ class Squelch(object):
             self._squelch_on_seq = seq
             is_open = True
         if self._status_msg:
-            sys.stdout.write('\r Median: %6.1f Thr: %6.1f %s ' % (median_nf, rssi_thresh, ("s", "S")[is_open]))
+            if self._options.log_level != 'debug':
+                sys.stdout.write('\r  Median: %6.1f Thr: %6.1f %s ' % (median_nf, rssi_thresh, ("s", "S")[is_open]))
+            else:
+                t = time.strftime('%H:%M:%S', time.gmtime())
+                sys.stdout.write('Median:    %6.1f Thr: %6.1f %s %s\n' % (median_nf, rssi_thresh, t, ("s", "S")[is_open]))
             sys.stdout.flush()
             self._need_nl = True
         if not is_open:
             return False
         if seq > self._squelch_on_seq + self._tail_delay:
-            logging.info("\nSquelch closed")
+            logging.info("Squelched")
             self._squelch_on_seq = None
             return False
         return is_open
@@ -168,77 +264,10 @@ class Squelch(object):
 class KiwiSoundRecorder(KiwiSDRStream):
     def __init__(self, options):
         super(KiwiSoundRecorder, self).__init__()
-        self._options = options
-        self._type = 'SND'
-        freq = options.frequency
-        #logging.info("%s:%s freq=%d" % (options.server_host, options.server_port, freq))
-        self._freq = freq
-        self._freq_offset = options.freq_offset
-        self._start_ts = None
-        self._start_time = None
-        self._squelch = Squelch(self._options) if options.sq_thresh is not None else None
-        if options.scan_yaml is not None:
-            self._squelch = [Squelch(options).set_threshold(options.scan_yaml['threshold']) for _ in range(len(options.scan_yaml['frequencies']))]
-        self._last_gps = dict(zip(['last_gps_solution', 'dummy', 'gpssec', 'gpsnsec'], [0,0,0,0]))
-        self._resampler = None
-        self._kiwi_samplerate = False
-        self._gnss_performance = GNSSPerformance()
+        _init_common(self, options, 'SND')
 
     def _setup_rx_params(self):
-        if self._options.no_api:
-            self._setup_no_api()
-            return
-        self.set_name(self._options.user)
-
-        self.set_freq(self._freq)
-
-        if self._options.agc_gain != None: ## fixed gain (no AGC)
-            self.set_agc(on=False, gain=self._options.agc_gain)
-        elif self._options.agc_yaml_file != None: ## custon AGC parameters from YAML file
-            self.set_agc(**self._options.agc_yaml)
-        else: ## default is AGC ON (with default parameters)
-            self.set_agc(on=True)
-
-        if self._options.compression is False:
-            self._set_snd_comp(False)
-
-        if self._options.nb is True or self._options.nb_test is True:
-            gate = self._options.nb_gate
-            if gate < 100 or gate > 5000:
-                gate = 100
-            nb_thresh = self._options.nb_thresh
-            if nb_thresh < 0 or nb_thresh > 100:
-                nb_thresh = 50
-            self.set_noise_blanker(gate, nb_thresh)
-
-        if self._options.de_emp is True:
-            self.set_de_emp(1)
-
-        self._output_sample_rate = self._sample_rate
-
-        if self._squelch:
-            if type(self._squelch) == list: ## scan mode
-                for s in self._squelch:
-                    s.set_sample_rate(self._sample_rate)
-            else:
-                self._squelch.set_sample_rate(self._sample_rate)
-
-        if self._options.test_mode:
-            self._set_stats()
-
-        if self._options.resample > 0 and not HAS_RESAMPLER:
-            self._setup_resampler()
-
-        if self._options.devel is not None:
-            for pair in self._options.devel.split(','):
-                vals = pair.split(':')
-                if len(vals) != 2:
-                    raise Exception("--devel arg \"%s\" needs to be format \"[0-7]:float_value\"" % pair)
-                which = int(vals[0])
-                value = float(vals[1])
-                if not (0 <= which <= 7):
-                    raise Exception("--devel first arg \"%d\" of \"[0-7]:float_value\" is out of range" % which)
-                self._send_message('SET devl.p%d=%.9g' % (which, value))
+        _setup_rx_snd_params(self, self._options.user)
 
     def _setup_resampler(self):
         if self._options.resample > 0:
@@ -257,7 +286,7 @@ class KiwiSoundRecorder(KiwiSDRStream):
                 else:
                     ## work around a bug in python-samplerate:
                     ##  the following makes sure that ratio * 512 is an integer
-                    ##  at the expense of resampling frequency precision for some resampling frequencies (it's ok for 375 Hz)
+                    ##  at the expense of resampling frequency precision for some resampling frequencies (it's ok for WSPR 375 Hz)
                     fs = 10*round(self._sample_rate/10) ## rounded sample rate
                     ratio = self._options.resample / fs
                     n = 512 ## KiwiSDR block length for samples
@@ -267,30 +296,39 @@ class KiwiSoundRecorder(KiwiSDRStream):
                 self._output_sample_rate = self._ratio * self._sample_rate
                 logging.warning('resampling from %g to %g Hz (ratio=%f)' % (self._sample_rate, self._output_sample_rate, self._ratio))
 
-    def _squelch_status(self, seq, samples, rssi):
+    def _squelch_status(self, seq, rssi, fmt):
         if not self._options.quiet:
-            sys.stdout.write('\rBlock: %08x, RSSI: %6.1f ' % (seq, rssi))
+            fmt = "" if fmt is None or self._options.log_level != 'debug' else fmt
+            if self._options.log_level != 'debug':
+                sys.stdout.write('\rBlock: %08x, RSSI: %6.1f %s ' % (seq, rssi, fmt))
+            else:
+                t = time.strftime('%H:%M:%S', time.gmtime())
+                sys.stdout.write('Block: %08x, RSSI: %6.1f %s %s\n' % (seq, rssi, t, fmt))
+            sys.stdout.flush()
             self._need_nl = True
-        if self._squelch and type(self._squelch) == list: ## scan mode
-            if self._options.quiet:
-                sys.stdout.write('\r')
-            sys.stdout.write(" scan: [%s] freq = %g kHz      " % (self._options.scan_state, self._freq))
-            self._need_nl = True
-        sys.stdout.flush()
 
         is_open = True
         if self._squelch:
             if type(self._squelch) == list: ## scan mode
-                if self._options.scan_state == "WAIT":
+                self._options.scan_list = True
+                if self._options.scan_state == 'INIT':
+                    self._squelch[self._options.scan_index].process(seq, rssi)
+                    is_open = False
+                if self._options.scan_state == 'WAIT':
                     is_open = False
                     now = time.time()
                     if now - self._options.scan_time > self._options.scan_yaml['wait']:
                         self._options.scan_time = now
                         self._options.scan_state = 'DWELL'
                 if self._options.scan_state == 'DWELL':
-                    is_open = self._squelch[self._options.scan_index].process(seq, rssi)
+                    if self._scan_continuous:
+                        is_open = True
+                        check_time = True   # scanning never stops
+                    else:
+                        is_open = self._squelch[self._options.scan_index].process(seq, rssi)
+                        check_time = not is_open    # stops scanning when squelch open
                     now = time.time()
-                    if not is_open and now - self._options.scan_time > self._options.scan_yaml['dwell']:
+                    if check_time and now - self._options.scan_time > self._options.scan_yaml['dwell']:
                         self._options.scan_index = (self._options.scan_index + 1) % len(self._options.scan_yaml['frequencies'])
                         self.set_freq(self._options.scan_yaml['frequencies'][self._options.scan_index])
                         self._options.scan_time = now
@@ -298,18 +336,26 @@ class KiwiSoundRecorder(KiwiSDRStream):
                         self._start_ts = None
                         self._start_time = None
             else: ## single channel mode
+                self._options.scan_list = False
                 is_open = self._squelch.process(seq, rssi)
                 if not is_open:
                     self._start_ts = None
                     self._start_time = None
+
+        if self._squelch and type(self._squelch) == list: ## scan mode
+            t = time.strftime('%H:%M:%S', time.gmtime())
+            first = '\r' if self._options.quiet else ''
+            last = '\n' if self._options.log_level == 'debug' else ''
+            sys.stdout.write("%sScan: %s %s %-5s %g kHz      %s" % (first, t, ("s", "S")[is_open], self._options.scan_state, self._freq, last))
+            self._need_nl = True
+            sys.stdout.flush()
         return is_open
 
 
-    def _process_audio_samples(self, seq, samples, rssi):
-        is_open = self._squelch_status(seq, samples, rssi)
+    def _process_audio_samples(self, seq, samples, rssi, fmt):
+        is_open = self._squelch_status(seq, rssi, fmt)
         if not is_open:
             return
-
 
         if self._options.resample > 0:
             if HAS_RESAMPLER:
@@ -325,14 +371,17 @@ class KiwiSoundRecorder(KiwiSDRStream):
                 xp = np.arange(n)
                 samples = np.round(np.interp(xa,xp,samples)).astype(np.int16)
 
+        logging.debug('ws')
         self._write_samples(samples, {})
 
-    def _process_iq_samples(self, seq, samples, rssi, gps):
-        if not self._squelch_status(seq, samples, rssi):
+    def _process_iq_samples(self, seq, samples, rssi, gps, fmt):
+        if not self._squelch_status(seq, rssi, fmt):
             return
 
-        ##print gps['gpsnsec']-self._last_gps['gpsnsec']
-        self._last_gps = gps
+        if gps != None:
+            ##print gps['gpsnsec']-self._last_gps['gpsnsec']
+            self._last_gps = gps
+
         ## convert list of complex numbers into an array
         s = np.zeros(2*len(samples), dtype=np.int16)
         s[0::2] = np.real(samples).astype(np.int16)
@@ -358,10 +407,11 @@ class KiwiSoundRecorder(KiwiSDRStream):
 
         self._write_samples(s, gps)
 
-        # no GPS or no recent GPS solution
-        last = gps['last_gps_solution']
-        if last == 255 or last == 254:
-            self._options.status = 3
+        if gps != None:
+            # no GPS or no recent GPS solution
+            last = gps['last_gps_solution']
+            if last == 255 or last == 254:
+                self._options.status = 3
 
     def _update_wav_header(self):
         with open(self._get_output_filename(), 'r+b') as fp:
@@ -371,31 +421,35 @@ class KiwiSoundRecorder(KiwiSDRStream):
 
             # fp.tell() sometimes returns zero. _write_wav_header writes filesize - 8
             if filesize >= 8:
-                _write_wav_header(fp, filesize, self._output_sample_rate, self._num_channels, self._options.is_kiwi_wav)
+                _write_wav_header(self, fp, filesize, self._output_sample_rate, self._num_channels, self._options.is_kiwi_wav)
 
     def _write_samples(self, samples, *args):
         """Output to a file on the disk."""
+        if self._options.test_mode or self._options.scan_state == 'WAIT':
+            return
         now = time.gmtime()
         sec_of_day = lambda x: 3600*x.tm_hour + 60*x.tm_min + x.tm_sec
         dt_reached = self._options.dt != 0 and self._start_ts is not None and sec_of_day(now)//self._options.dt != sec_of_day(self._start_ts)//self._options.dt
         if self._start_ts is None or (self._options.filename == '' and dt_reached):
+            #logging.info("dt_reached=%d,%d start_ts=%d" % (dt_reached, self._options.dt, self._start_ts == None))
             self._start_ts = now
             self._start_time = time.time()
             # Write a static WAV header
             with open(self._get_output_filename(), 'wb') as fp:
-                _write_wav_header(fp, 100, self._output_sample_rate, self._num_channels, self._options.is_kiwi_wav)
+                _write_wav_header(self, fp, 100, self._output_sample_rate, self._num_channels, self._options.is_kiwi_wav)
             if self._options.is_kiwi_tdoa:
-                # NB for TDoA support: MUST be a print (i.e. not a logging.info)
+                # NB for TDoA support: MUST be a print to stdout (i.e. not a logging.info to stderr)
                 print("file=%d %s" % (self._options.idx, self._get_output_filename()))
             else:
                 logging.info("Started a new file: %s" % self._get_output_filename())
         with open(self._get_output_filename(), 'ab') as fp:
             if self._options.is_kiwi_wav:
                 gps = args[0]
-                self._gnss_performance.analyze(self._get_output_filename(), gps)
-                fp.write(struct.pack('<4sIBBII', b'kiwi', 10, gps['last_gps_solution'], 0, gps['gpssec'], gps['gpsnsec']))
-                sample_size = samples.itemsize * len(samples)
-                fp.write(struct.pack('<4sI', b'data', sample_size))
+                if gps != None:
+                    self._gnss_performance.analyze(self._get_output_filename(), gps)
+                    fp.write(struct.pack('<4sIBBII', b'kiwi', 10, gps['last_gps_solution'], 0, gps['gpssec'], gps['gpsnsec']))
+                    sample_size = samples.itemsize * len(samples)
+                    fp.write(struct.pack('<4sI', b'data', sample_size))
             # TODO: something better than that
             samples.tofile(fp)
         self._update_wav_header()
@@ -599,6 +653,9 @@ class KiwiExtensionRecorder(KiwiSDRStream):
         self.set_name(self._options.user)
         # rx_chan deprecated, sent for backward compatibility only
         self._send_message('SET ext_switch_to_client=%s first_time=1 rx_chan=0' % self._options.extension)
+        if self._options.no_api:
+            self._setup_no_api()
+            return
 
         if (self._options.extension == 'DRM'):
             if self._kiwi_version is not None and self._kiwi_version >= 1.550:
@@ -636,80 +693,51 @@ class KiwiExtensionRecorder(KiwiSDRStream):
 class KiwiNetcat(KiwiSDRStream):
     def __init__(self, options, reader):
         super(KiwiNetcat, self).__init__()
-        self._options = options
-        self._type = 'W/F' if options.waterfall is True else 'SND'
+        _init_common(self, options, 'W/F' if options.waterfall is True else 'SND')
         self._reader = reader
-        freq = options.frequency
-        #logging.info("%s:%s freq=%d" % (options.server_host, options.server_port, freq))
-        self._freq = freq
-        self._freq_offset = options.freq_offset
-        self._start_ts = None
-        #self._start_time = None
         self._start_time = time.time()
         self._options.stats = None
-        self._squelch = Squelch(self._options) if options.sq_thresh is not None else None
-        self._last_gps = dict(zip(['last_gps_solution', 'dummy', 'gpssec', 'gpsnsec'], [0,0,0,0]))
         self._fp_stdout = os.fdopen(sys.stdout.fileno(), 'wb')
-        self._first = True;
+        self._first = True
 
     def _setup_rx_params(self):
         user = self._options.user
         if user == "kiwirecorder.py":
             user = "kiwi_nc.py"
-        self.set_name(user)
+
+        if self._camp_chan != -1 and self._kiwi_version is not None and self._kiwi_version < 1.813:
+            raise Exception('Option --camp requires camped Kiwi be running v1.813 or later')
 
         if self._type == 'SND':
-            self.set_freq(self._freq)
-
-            if self._options.agc_gain != None: ## fixed gain (no AGC)
-                self.set_agc(on=False, gain=self._options.agc_gain)
-            elif self._options.agc_yaml_file != None: ## custon AGC parameters from YAML file
-                self.set_agc(**self._options.agc_yaml)
-            else: ## default is AGC ON (with default parameters)
-                self.set_agc(on=True)
-
-            if self._options.compression is False:
-                self._set_snd_comp(False)
-
-            if self._options.nb is True or self._options.nb_test is True:
-                gate = self._options.nb_gate
-                if gate < 100 or gate > 5000:
-                    gate = 100
-                nb_thresh = self._options.nb_thresh
-                if nb_thresh < 0 or nb_thresh > 100:
-                    nb_thresh = 50
-                self.set_noise_blanker(gate, nb_thresh)
-
-            if self._options.de_emp is True:
-                self.set_de_emp(1)
-
+            _setup_rx_snd_params(self, user)
         else:   # waterfall
+            self.set_name(user)
             self._set_maxdb_mindb(-10, -110)    # needed, but values don't matter
             self._set_zoom_cf(0, 0)
             self._set_wf_comp(False)
             self._set_wf_speed(1)   # 1 Hz update
 
-    def _process_audio_samples_raw(self, seq, samples, rssi):
+    def _process_audio_samples(self, seq, samples, rssi, fmt):
         if self._options.progress is True:
-            sys.stderr.write('\rBlock: %08x, RSSI: %6.1f' % (seq, rssi))
+            fmt = "" if fmt is None or self._options.log_level != 'debug' else fmt
+            sys.stderr.write('\rBlock: %08x, RSSI: %6.1f %s ' % (seq, rssi, fmt))
             sys.stderr.flush()
-        if self._squelch:
-            is_open = self._squelch.process(seq, rssi)
-            if not is_open:
-                self._start_ts = None
-                self._start_time = None
-                return
         self._write_samples(samples, {})
 
-    def _process_iq_samples_raw(self, seq, data):
+    def _process_iq_samples(self, seq, samples, rssi, gps, fmt):
         if self._options.progress is True:
-            sys.stderr.write('\rBlock: %08x, RSSI: %6.1f' % (seq, rssi))
+            fmt = "" if fmt is None or self._options.log_level != 'debug' else fmt
+            sys.stderr.write('\rBlock: %08x, RSSI: %6.1f %s ' % (seq, rssi, fmt))
             sys.stderr.flush()
-        count = len(data) // 2
-        samples = np.ndarray(count, dtype='>h', buffer=data).astype(np.int16)
+        if self._camping:
+            ## convert list of complex numbers into an array
+            s = np.zeros(2*len(samples), dtype=np.int16)
+            s[0::2] = np.real(samples).astype(np.int16)
+            s[1::2] = np.imag(samples).astype(np.int16)
+            samples = s
         self._write_samples(samples, {})
 
-    def _process_waterfall_samples_raw(self, samples, seq):
+    def _process_waterfall_samples_raw(self, seq, samples):
         if self._options.progress is True:
             nbins = len(samples)
             bins = nbins-1
@@ -733,10 +761,8 @@ class KiwiNetcat(KiwiSDRStream):
         self._fp_stdout.flush()
 
     def _write_samples(self, samples, *args):
-        if self._options.progress is True:
-            return
         if self._options.nc_wav and self._first == True:
-            _write_wav_header(self._fp_stdout, 0x7ffffff0, self._sample_rate, 2, False)
+            _write_wav_header(self, self._fp_stdout, 0x7ffffff0, self._sample_rate, self._num_channels, False)
             self._first = False
         self._fp_stdout.write(samples)
         self._fp_stdout.flush()
@@ -776,10 +802,11 @@ def get_comma_separated_args(option, opt, value, parser, fn):
     setattr(parser.values, option.dest, values)
 ##    setattr(parser.values, option.dest, map(fn, value.split(',')))
 
-def join_threads(snd, wf, ext):
+def join_threads(snd, wf, ext, nc):
     [r._event.set() for r in snd]
     [r._event.set() for r in wf]
     [r._event.set() for r in ext]
+    [r._event.set() for r in nc]
     [t.join() for t in threading.enumerate() if t is not threading.current_thread()]
 
 def main():
@@ -934,7 +961,7 @@ def main():
                       dest='frequency',
                       type='string', default=15000,     # 15000 prevents --wf mode span error for zoom=0
                       help='Frequency to tune to, in kHz (can be a comma-separated list). '
-                        'For sideband modes (lsb/lsn/usb/usn/cw/cwn) this is the carrier frequency. '
+                        'For sideband modes (lsb/lsn/usb/usn/cw/cwn) this is the carrier/dial frequency. '
                         'See --pbc option below. Also sets waterfall mode center frequency.',
                       action='callback',
                       callback_args=(float,),
@@ -1018,7 +1045,7 @@ def main():
                       dest='is_kiwi_tdoa',
                       action='store_true', default=False,
                       help='Used when called by Kiwi TDoA extension')
-    group.add_option('--test-mode',
+    group.add_option('--test-mode', '--no-output-files',
                       dest='test_mode',
                       action='store_true', default=False,
                       help='Write wav data to /dev/null (Linux) or NUL (Windows)')
@@ -1026,6 +1053,10 @@ def main():
                       dest='sound',
                       action='store_true', default=False,
                       help='Also process sound data when in waterfall or S-meter mode (sound connection options above apply)')
+    group.add_option('--camp', '--camp-chan',
+                      dest='camp_chan',
+                      type='int', default=-1,
+                      help='Camp on an existing audio channel instead of opening a new connection. Argument is Kiwi channel number. Note that camping does not currently support resampling, squelch or GPS timestamps.')
     group.add_option('--wb', '--wideband',
                       dest='wideband',
                       action='store_true', default=False,
@@ -1101,19 +1132,19 @@ def main():
     group.add_option('--nc', '--netcat',
                       dest='netcat',
                       action='store_true', default=False,
-                      help='Open a netcat connection')
+                      help='Open a netcat connection. Note that netcat does not currently support resampling, squelch or GPS timestamps.')
     group.add_option('--nc-wav', '--nc_wav',
                       dest='nc_wav',
                       action='store_true', default=False,
-                      help='Format output as an continuous wav file stream')
+                      help='Format output as an continuous wav file stream. Note that --nc-wav does not currently support resampling, squelch or GPS timestamps.')
     group.add_option('--fdx',
                       dest='fdx',
                       action='store_true', default=False,
                       help='Connection is full duplex (two-way)')
-    parser.add_option('--progress',
+    group.add_option('--progress',
                       dest='progress',
                       action='store_true', default=False,
-                      help='Print progress messages instead of output of binary data')
+                      help='Print progress messages (doesn\'t effect streamed data)')
     parser.add_option_group(group)
 
     group = OptionGroup(parser, "KiwiSDR development options", "")
@@ -1127,6 +1158,10 @@ def main():
                       help='Make local network connections appear non-local')
     group.add_option('--no-api',
                       dest='no_api',
+                      action='store_true', default=False,
+                      help='Simulate connection to Kiwi using improper/incomplete API')
+    group.add_option('--bad-cmd',
+                      dest='bad_cmd',
                       action='store_true', default=False,
                       help='Simulate connection to Kiwi using improper/incomplete API')
     group.add_option('--devel',
@@ -1144,7 +1179,7 @@ def main():
     parser.destroy()
 
     if options.krec_version:
-        print('kiwirecorder v1.4')
+        print('kiwirecorder %s' % VERSION)
         sys.exit()
 
     FORMAT = '%(asctime)-15s pid %(process)5d %(message)s'
@@ -1154,6 +1189,9 @@ def main():
 
     run_event = threading.Event()
     run_event.set()
+
+    if options.freq_pbc:
+        logging.info('command line: --pbc')
 
     if options.S_meter >= 0:
         if options.S_meter > 0 and options.sdt != 0:
@@ -1177,6 +1215,18 @@ def main():
             options.interp = 10
             print('--wf-peaks note: no --wf-interp specified, so using MAX+CIC (=10)')
 
+    if options.netcat:
+        if options.resample != 0:
+            raise Exception('resampling not currently supported by --netcat. Email Kiwi support if you really need it.')
+        if options.sq_thresh is not None:
+            raise Exception('squelch not currently supported by --netcat. Email Kiwi support if you really need it.')
+        if options.is_kiwi_wav is True:
+            raise Exception('GPS timestamps not currently supported by --netcat. Email Kiwi support if you really need it.')
+
+    if options.camp_chan != -1:
+        if options.resample != 0:
+            raise Exception('resampling not currently supported by --camp. Email Kiwi support if you really need it.')
+
     ### decode AGC YAML file options
     options.agc_yaml = None
     if options.agc_yaml_file:
@@ -1195,7 +1245,7 @@ def main():
             logging.fatal(e)
             return
 
-    ### decode AGC YAML file options
+    ### decode scan YAML file options
     options.scan_yaml = None
     if options.scan_yaml_file:
         try:
@@ -1208,7 +1258,7 @@ def main():
                 logging.debug('Scan file %s: %s' % (options.scan_yaml_file, documents))
                 logging.debug('Got Scan parameters from file %s: %s' % (options.scan_yaml_file, documents['Scan']))
                 options.scan_yaml = documents['Scan']
-                options.scan_state = 'WAIT'
+                options.scan_state = 'INIT'
                 options.scan_time = time.time()
                 options.scan_index = 0
                 options.scan_yaml['frequencies'] = [float(f) for f in options.scan_yaml['frequencies']]
@@ -1222,7 +1272,6 @@ def main():
             logging.fatal(e)
             return
 
-    options.raw = True if options.netcat else False
     options.rigctl_enabled = False
     
     options.maxdb = clamp(options.maxdb, -170, -10)
@@ -1238,56 +1287,55 @@ def main():
         for i,opt in enumerate(options):
             opt.multiple_connections = multiple_connections
             opt.idx = i
-            snd_recorders.append(KiwiWorker(args=(KiwiSoundRecorder(opt),opt,run_event)))
+            snd_recorders.append(KiwiWorker(args=(KiwiSoundRecorder(opt),opt,False,run_event)))
 
     wf_recorders = []
     if not gopt.netcat and gopt.waterfall:
         for i,opt in enumerate(options):
             opt.multiple_connections = multiple_connections
             opt.idx = i
-            wf_recorders.append(KiwiWorker(args=(KiwiWaterfallRecorder(opt),opt,run_event)))
+            wf_recorders.append(KiwiWorker(args=(KiwiWaterfallRecorder(opt),opt,False,run_event)))
 
     ext_recorders = []
     if not gopt.netcat and (gopt.extension is not None):
         for i,opt in enumerate(options):
             opt.multiple_connections = multiple_connections
             opt.idx = i
-            ext_recorders.append(KiwiWorker(args=(KiwiExtensionRecorder(opt),opt,run_event)))
+            ext_recorders.append(KiwiWorker(args=(KiwiExtensionRecorder(opt),opt,True,run_event)))
 
     nc_recorders = []
     if gopt.netcat:
         for i,opt in enumerate(options):
             opt.multiple_connections = multiple_connections
             opt.idx = 0
-            nc_recorders.append(KiwiWorker(args=(KiwiNetcat(opt, True),opt,run_event)))
+            nc_recorders.append(KiwiWorker(args=(KiwiNetcat(opt, True),opt,False,run_event)))
             if gopt.fdx:
                 opt.writer_init = False
                 opt.idx = 1
-                nc_recorders.append(KiwiWorker(args=(KiwiNetcat(opt, False),opt,run_event)))
+                nc_recorders.append(KiwiWorker(args=(KiwiNetcat(opt, False),opt,False,run_event)))
     try:
         for i,r in enumerate(snd_recorders):
-            if opt.launch_delay != 0 and i != 0 and options[i-1].server_host == options[i].server_host:
-                time.sleep(opt.launch_delay)
+            if gopt.launch_delay != 0 and i != 0 and options[i-1].server_host == options[i].server_host:
+                time.sleep(gopt.launch_delay)
             r.start()
             #logging.info("started sound recorder %d, timestamp=%d" % (i, options[i].ws_timestamp))
             logging.info("started sound recorder %d" % i)
 
         for i,r in enumerate(wf_recorders):
-            if i != 0 and options[i-1].server_host == options[i].server_host:
-                time.sleep(opt.launch_delay)
+            if gopt.launch_delay != 0 and i != 0 and options[i-1].server_host == options[i].server_host:
+                time.sleep(gopt.launch_delay)
             r.start()
             logging.info("started waterfall recorder %d" % i)
 
         for i,r in enumerate(ext_recorders):
-            if i != 0 and options[i-1].server_host == options[i].server_host:
-                time.sleep(opt.launch_delay)
-            time.sleep(3)   # let snd/wf get established first
+            if gopt.launch_delay != 0 and i != 0 and options[i-1].server_host == options[i].server_host:
+                time.sleep(gopt.launch_delay)
             r.start()
             logging.info("started extension recorder %d" % i)
 
         for i,r in enumerate(nc_recorders):
-            if opt.launch_delay != 0 and i != 0 and options[i-1].server_host == options[i].server_host:
-                time.sleep(opt.launch_delay)
+            if gopt.launch_delay != 0 and i != 0 and options[i-1].server_host == options[i].server_host:
+                time.sleep(gopt.launch_delay)
             r.start()
             #logging.info("started netcat recorder %d, timestamp=%d" % (i, options[i].ws_timestamp))
             logging.info("started netcat recorder %d" % i)
@@ -1307,7 +1355,7 @@ def main():
 
     if gopt.is_kiwi_tdoa:
       for i,opt in enumerate(options):
-          # NB for TDoA support: MUST be a print (i.e. not a logging.info)
+          # NB for TDoA support: MUST be a print to stdout (i.e. not a logging.info to stderr)
           print("status=%d,%d" % (i, opt.status))
 
     if gopt.gc_stats:

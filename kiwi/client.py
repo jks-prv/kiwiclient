@@ -61,7 +61,12 @@ class ImaAdpcmDecoder(object):
         self.index = 0
         self.prev = 0
 
+    def preset(self, index, prev):
+        self.index = index
+        self.prev = prev
+
     def _decode_sample(self, code):
+        #logging.debug("%d|%d" % (self.index, len(stepSizeTable)-1))
         step = stepSizeTable[self.index]
         self.index = clamp(self.index + indexAdjustTable[code], 0, len(stepSizeTable) - 1)
         difference = step >> 3
@@ -99,6 +104,8 @@ class KiwiRedirectError(KiwiError):
     pass
 class KiwiDownError(KiwiError):
     pass
+class KiwiCampError(KiwiError):
+    pass
 class KiwiBadPasswordError(KiwiError):
     pass
 class KiwiNoMultipleConnectionsError(KiwiError):
@@ -121,7 +128,7 @@ class KiwiSDRStreamBase(object):
         self._version_minor = None
         self._kiwi_version = None
         self._modulation = None
-        self._IQ_or_DRM_or_stereo = False
+        self._stereo = False
         self._num_channels = 1
         self._lowcut = 0
         self._highcut = 0
@@ -151,7 +158,8 @@ class KiwiSDRStreamBase(object):
     def _prepare_stream(self, host, port, which):
         self._stream_name = which
         self._socket = socket.create_connection(address=(host, port), timeout=self._options.socket_timeout)
-        uri = '%s/%d/%s' % ('/wb' if self._options.wideband else '', self._options.ws_timestamp, which)
+        uri = '%s/%d/%s%s' % ('/wb' if self._options.wideband else '', self._options.ws_timestamp, which, '?camp' if self._camp_chan != -1 else '')
+        logging.debug('uri=<%s>' % uri)
         handshake = ClientHandshakeProcessor(self._socket, host, port)
         handshake.handshake(uri)
 
@@ -166,6 +174,9 @@ class KiwiSDRStreamBase(object):
 
     def _send_message(self, msg):
         if msg != 'SET keepalive':
+            # stop sending commands back to Kiwi after receiving "SET monitor"
+            if self._camping:
+                return
             logging.debug("send SET (%s) \"%s\"", self._stream_name, msg)
         self._stream.send_message(msg)
 
@@ -194,6 +205,11 @@ class KiwiSDRStreamBase(object):
         self._process_message(tag, body)
 
 
+SND_FLAG_ADC_OVFL      = 0x02
+SND_FLAG_STEREO        = 0x08
+SND_FLAG_COMPRESSED    = 0x10
+SND_FLAG_LITTLE_ENDIAN = 0x80
+
 class KiwiSDRStream(KiwiSDRStreamBase):
     """KiwiSDR WebSocket stream client."""
 
@@ -205,7 +221,7 @@ class KiwiSDRStream(KiwiSDRStreamBase):
         self._version_minor = None
         self._kiwi_version = None
         self._modulation = None
-        self._IQ_or_DRM_or_stereo = False
+        self._stereo = False
         self._num_channels = 1
         self._lowcut = 0
         self._highcut = 0
@@ -218,6 +234,11 @@ class KiwiSDRStream(KiwiSDRStreamBase):
         self._stop = False
         self._need_nl = False
         self._kiwi_foff = 0
+        self._camp_chan = -1
+        self._camping = False
+        self._comp_set = False
+        self._decoder_index = 0
+        self._decoder_prev = 0
 
         self._default_passbands = {
             "am":  [ -4900, 4900 ],
@@ -268,9 +289,9 @@ class KiwiSDRStream(KiwiSDRStreamBase):
     def set_mod(self, mod, lc, hc, freq):
         mod = mod.lower()
         self._modulation = mod
-        self._IQ_or_DRM_or_stereo = mod in [ "iq", "drm", "sas", "qam" ]
-        self._num_channels = 2 if self._IQ_or_DRM_or_stereo else 1
-        logging.debug('set_mod: IQ_or_DRM_or_stereo=%d num_channels=%d' % (self._IQ_or_DRM_or_stereo, self._num_channels))
+        self._stereo = mod in [ "iq", "drm", "sas", "qam" ]
+        self._num_channels = 2 if self._stereo else 1
+        logging.debug('set_mod: stereo=%d num_channels=%d' % (self._stereo, self._num_channels))
         baseband_freq = self._remove_freq_offset(freq)
         
         if lc == None or hc == None:
@@ -282,9 +303,10 @@ class KiwiSDRStream(KiwiSDRStreamBase):
 
         if self._options.freq_pbc and mod in [ "lsb", "lsn", "usb", "usn", "cw", "cwn" ]:
             pbc = (lc + (hc - lc)/2)/1000
-            logging.debug('set_mod: car_freq=%.2f pbc_offset=%.2f pbc_freq=%.2f' % (baseband_freq, pbc, baseband_freq - pbc))
             freq = freq - pbc
+            baseband_orig = baseband_freq
             baseband_freq = baseband_freq - pbc
+            logging.debug('set_mod: freq=%.2f pbc_offset=%.2f pbc_freq=%.2f' % (baseband_orig, pbc, baseband_freq - pbc))
         self._send_message('SET mod=%s low_cut=%d high_cut=%d freq=%.3f' % (mod, lc, hc, baseband_freq))
         self._lowcut = lc
         self._highcut = hc
@@ -351,8 +373,11 @@ class KiwiSDRStream(KiwiSDRStreamBase):
         self._send_message('SET maxdb=%d mindb=%d' % (maxdb, mindb))
 
     def _set_snd_comp(self, comp):
-        self._compression = comp
-        self._send_message('SET compression=%d' % (1 if comp else 0))
+        # ignore command line compression setting in camp mode because compression
+        # is determined by audio stream flag
+        if self._camp_chan == -1 and not self._camping:
+            self._compression = comp
+            self._send_message('SET compression=%d' % (1 if comp else 0))
 
     def _set_stats(self):
         self._send_message('SET STATS_UPD ch=0')
@@ -380,11 +405,13 @@ class KiwiSDRStream(KiwiSDRStreamBase):
         logging.info("Kiwi server version: %d.%d" % (self._version_major, self._version_minor))
 
     def _process_msg_param(self, name, value):
+        prefix = "recv MSG (%s)" % (self._stream_name)
+
         if name == 'extint_list_json':
             value = urllib.unquote(value)
 
         if name == 'load_cfg':
-            logging.debug("load_cfg: (cfg info not printed)")
+            logging.debug("%s load_cfg: (cfg info not printed)" % prefix)
             d = json.loads(urllib.unquote(value))
             self._gps_pos = [float(x) for x in urllib.unquote(d['rx_gps'])[1:-1].split(",")[0:2]]
             if self._options.idx == 0:
@@ -392,13 +419,28 @@ class KiwiSDRStream(KiwiSDRStreamBase):
             self._on_gnss_position(self._gps_pos)
             return
         elif name == 'load_dxcfg':
-            logging.debug("load_dxcfg: (cfg info not printed)")
+            logging.debug("%s load_dxcfg: (cfg info not printed)" % prefix)
             return
         elif name == 'load_dxcomm_cfg':
-            logging.debug("load_dxcomm_cfg: (cfg info not printed)")
+            logging.debug("%s load_dxcomm_cfg: (cfg info not printed)" % prefix)
             return
+        elif name == 'camp':
+            v = value.split(",")
+            logging.debug("%s camp: okay=%s rx=%s" % (prefix, v[0], v[1]))
+            return
+        elif name == 'audio_camp':
+            v = value.split(",")
+            logging.debug("%s audio_camp: disconnect=%s isLocal=%s" % (prefix, v[0], v[1]))
+            return
+        elif name == 'antsw_AntennaDenySwitching':
+            return
+        #elif name.startswith('antsw_'):
+        #    return
         else:
-            logging.debug("recv MSG (%s) %s: %s", self._stream_name, name, value)
+            if value is None:
+                logging.debug("%s %s" % (prefix, name))
+            else:
+                logging.debug("%s %s: %s" % (prefix, name, value))
 
         # Handle error conditions
         if name == 'too_busy':
@@ -411,6 +453,8 @@ class KiwiSDRStream(KiwiSDRStreamBase):
             raise KiwiNoMultipleConnectionsError('%s: no multiple connections from the same IP address' % self._options.server_host)
         if name == 'down':
             raise KiwiDownError('%s: server is down atm' % self._options.server_host)
+        if name == 'camp_disconnect':
+            raise KiwiCampError("%s: camped connection closed or doesn't exist" % self._options.server_host)
 
         # Handle data items
         if name == 'audio_rate':
@@ -425,6 +469,11 @@ class KiwiSDRStream(KiwiSDRStreamBase):
             self._setup_rx_params()
             # Also send a keepalive
             self._set_keepalive()
+        elif name == 'monitor':
+            if self._camp_chan != -1:
+                self._send_message('SET MON_CAMP=%d' % self._camp_chan)
+                self._compression = False
+                self._camping = True
         elif name == 'bandwidth':
             self.MAX_FREQ = float(value)/1000       # allows e.g. 32 MHz Kiwis
         elif name == 'wf_setup':
@@ -449,15 +498,19 @@ class KiwiSDRStream(KiwiSDRStreamBase):
             self._setup_rx_params()
         elif name == 'freq_offset':
             self._kiwi_foff = float(value)
+        elif name == 'audio_adpcm_state':
+            decoder_preset = value.split(",")
+            self._decoder_index = int(decoder_preset[0])
+            self._decoder_prev  = int(decoder_preset[1])
 
     def _process_message(self, tag, body):
         if tag == 'MSG':
             self._process_msg(bytearray2str(body[1:])) ## skip 1st byte
         elif tag == 'SND':
-            try:
-                self._process_aud(body)
-            except Exception as e:
-                logging.error(e)
+            #try:
+            self._process_aud(body)
+            #except Exception as e:
+            #    logging.error(e)
             # Ensure we don't get kicked due to timeouts
             self._set_keepalive()
         elif tag == 'W/F':
@@ -492,8 +545,21 @@ class KiwiSDRStream(KiwiSDRStreamBase):
         data       = body[7:]
         rssi       = 0.1*smeter - 127
         ##logging.info("SND flags %2d seq %6d RSSI %6.1f len %d" % (flags, seq, rssi, len(data)))
-        if self._options.ADC_OV and (flags & 2):
+        if self._options.ADC_OV and (flags & SND_FLAG_ADC_OVFL):
             print(" ADC OV")
+
+        if self._camp_chan != -1:
+            if flags & SND_FLAG_COMPRESSED:
+                self._compression = True
+                if self._comp_set == False:
+                    logging.debug("CAMP decoder PRESET %d,%d" % (self._decoder_index, self._decoder_prev))
+                    self._decoder.preset(self._decoder_index, self._decoder_prev)
+                    self._comp_set = True
+
+            else:
+                self._decoder_index = self._decoder_prev = 0
+                self._compression = False
+                self._comp_set = False
 
         # first rssi is no good because first audio buffer is leftover from last time this channel was used
         if self._options.S_meter >= 0 and not self._s_meter_valid:
@@ -545,39 +611,72 @@ class KiwiSDRStream(KiwiSDRStreamBase):
                     if not self._options.sound:
                         return
 
-        if self._IQ_or_DRM_or_stereo:
-            gps = dict(zip(['last_gps_solution', 'dummy', 'gpssec', 'gpsnsec'], struct.unpack('<BBII', buffer(data[0:10]))))
-            data = data[10:]
-            if self._options.raw is True:
-                self._process_iq_samples_raw(seq, data)
-            else:
+        # in camp mode it's the stream we're camping on that can have arbitrary endedness 
+        dtype = '<h' if (self._camping and flags & SND_FLAG_LITTLE_ENDIAN) else '>h'
+
+        if self._camping:
+            if flags & SND_FLAG_STEREO:     # stereo mode is never compressed
+                gps = dict(zip(['last_gps_solution', 'dummy', 'gpssec', 'gpsnsec'], struct.unpack('<BBII', buffer(data[0:10]))))
+                data = data[10:]
+                fmt = "(CAMP stereo)"
                 count = len(data) // 2
-                samples = np.ndarray(count, dtype='>h', buffer=data).astype(np.float32)
+                samples = np.ndarray(count, dtype=dtype, buffer=data).astype(np.float32)
                 cs      = np.ndarray(count//2, dtype=np.complex64)
                 cs.real = samples[0:count:2]
                 cs.imag = samples[1:count:2]
-                self._process_iq_samples(seq, cs, rssi, gps)
-        else:
-            if self._options.raw is True:
-                if self._compression:
-                    data = self._decoder.decode(data)
-                self._process_audio_samples_raw(seq, data, rssi)
+                self._process_iq_samples(seq, cs, rssi, gps, fmt)
             else:
                 if self._compression:
+                    comp = "comp"
+                    sarray = self._decoder.decode(data)
+                    count = len(sarray)
+                    data = np.ndarray(count, dtype='int16', buffer=sarray)
+                    count = len(data)
+                else:
+                    comp = "no-comp"
+                    count = len(data) // 2
+
+                samples = np.ndarray(count, dtype=dtype, buffer=data).astype(np.float32)
+                cs      = np.ndarray(count, dtype=np.complex64)
+                cs.real = samples[0:count:1]
+                cs.imag = cs.real       # replicate mono audio in both channels
+                fmt = ("(CAMP mono %s)" % comp) if self._options.netcat is True else None
+                self._process_iq_samples(seq, cs, rssi, None, fmt)
+        else:
+            if self._stereo:     # stereo mode is never compressed
+                gps = dict(zip(['last_gps_solution', 'dummy', 'gpssec', 'gpsnsec'], struct.unpack('<BBII', buffer(data[0:10]))))
+                data = data[10:]
+                if self._options.netcat is True:
+                    count = len(data) // 2
+                    samples = np.ndarray(count, dtype=dtype, buffer=data).astype(np.int16)
+                else:
+                    count = len(data) // 2
+                    samples = np.ndarray(count, dtype=dtype, buffer=data).astype(np.float32)
+                    cs      = np.ndarray(count//2, dtype=np.complex64)
+                    cs.real = samples[0:count:2]
+                    cs.imag = samples[1:count:2]
+                    samples = cs
+                fmt = "(NC stereo)" if self._options.netcat is True else None
+                self._process_iq_samples(seq, samples, rssi, gps, fmt)
+            else:
+                if self._compression:
+                    comp = "comp"
                     sarray = self._decoder.decode(data)
                     count = len(sarray)
                     samples = np.ndarray(count, dtype='int16', buffer=sarray)
                 else:
+                    comp = "no-comp"
                     count = len(data) // 2
-                    samples = np.ndarray(count, dtype='>h', buffer=data).astype(np.int16)
-                self._process_audio_samples(seq, samples, rssi)
+                    samples = np.ndarray(count, dtype=dtype, buffer=data).astype(np.int16)
+                fmt = ("(NC mono %s)" % comp) if self._options.netcat is True else None
+                self._process_audio_samples(seq, samples, rssi, fmt)
 
     def _process_wf(self, body):
         x_bin_server,flags_x_zoom_server,seq, = struct.unpack('<III', buffer(body[0:12]))
         data = body[12:]
         #logging.info("W/F seq %d len %d" % (seq, len(data)))
-        if self._options.raw is True:
-            return self._process_waterfall_samples_raw(data, seq)
+        if self._options.netcat is True:
+            return self._process_waterfall_samples_raw(seq, data)
         if self._compression:
             self._decoder.__init__()   # reset decoder each sample
             samples = self._decoder.decode(data)
@@ -599,7 +698,10 @@ class KiwiSDRStream(KiwiSDRStreamBase):
             filename = '%s%s%s' % (self._options.filename, station, ext)
         else:
             ts  = time.strftime('%Y%m%dT%H%M%SZ', self._start_ts)
-            filename = '%s_%d%s_%s%s' % (ts, int(self._freq * 1000), station, self._options.modulation, ext)
+            if self._camping:
+                filename = '%s_camp_rx%d%s%s' % (ts, self._camp_chan, station, ext)
+            else:
+                filename = '%s_%d%s_%s%s' % (ts, int(self._freq * 1000), station, self._options.modulation, ext)
         if self._options.dir is not None:
             filename = '%s/%s' % (self._options.dir, filename)
         return filename
@@ -610,22 +712,16 @@ class KiwiSDRStream(KiwiSDRStreamBase):
     def _on_sample_rate_change(self):
         pass
 
-    def _process_audio_samples(self, seq, samples, rssi):
+    def _process_audio_samples(self, seq, samples, rssi, fmt):
         pass
 
-    def _process_audio_samples_raw(self, seq, data, rssi):
-        pass
-
-    def _process_iq_samples(self, seq, samples, rssi, gps):
-        pass
-
-    def _process_iq_samples_raw(self, seq, data):
+    def _process_iq_samples(self, seq, samples, rssi, gps, fmt):
         pass
 
     def _process_waterfall_samples(self, seq, samples):
         pass
 
-    def _process_waterfall_samples_raw(self, data, seq):
+    def _process_waterfall_samples_raw(self, seq, data):
         pass
 
     def _process_ext(self, name, value):
@@ -658,6 +754,9 @@ class KiwiSDRStream(KiwiSDRStreamBase):
             if user == 'bad2':
                 user = 'chr('+ chr(1) +'1)'
             self.set_name(user)
+        if self._options.bad_cmd:
+            self._send_message('SET xxx=0')
+            self._send_message('SET yyy=0')
 
     def _writer_message(self):
         pass

@@ -1,6 +1,6 @@
 ## -*- python -*-
 
-import logging
+import logging, time
 import threading
 from traceback import print_exc
 
@@ -10,7 +10,7 @@ from .rigctld import Rigctld
 class KiwiWorker(threading.Thread):
     def __init__(self, group=None, target=None, name=None, args=(), kwargs=None):
         super(KiwiWorker, self).__init__(group=group, target=target, name=name)
-        self._recorder, self._options, self._run_event = args
+        self._recorder, self._options, self._delay_run, self._run_event = args
         self._recorder._reader = True
         self._event = threading.Event()
         self._rigctld = None
@@ -23,10 +23,13 @@ class KiwiWorker(threading.Thread):
     def run(self):
         self.connect_count = self._options.connect_retries
         self.busy_count = self._options.busy_retries
+        if self._delay_run:     # let snd/wf get established first
+            time.sleep(3)
         
         while self._do_run():
             try:
                 self._recorder.connect(self._options.server_host, self._options.server_port)
+
             except Exception as e:
                 logging.warn("Failed to connect, sleeping and reconnecting error='%s'" %e)
                 if self._options.is_kiwi_tdoa:
@@ -46,6 +49,7 @@ class KiwiWorker(threading.Thread):
                     # do things like freq changes while not receiving sound
                     if self._rigctld:
                         self._rigctld.run()
+
             except KiwiServerTerminatedConnection as e:
                 if self._options.no_api:
                     msg = ''
@@ -58,6 +62,7 @@ class KiwiWorker(threading.Thread):
                 self._recorder._start_ts = None ## this makes the recorder open a new file on restart
                 self._event.wait(timeout=5)
                 continue
+
             except KiwiTooBusyError:
                 if self._options.is_kiwi_tdoa:
                     self._options.status = 2
@@ -70,6 +75,7 @@ class KiwiWorker(threading.Thread):
                 if self._options.busy_timeout > 0:
                     self._event.wait(timeout = self._options.busy_timeout)
                 continue
+
             except KiwiRedirectError as e:
                 prev = self._options.server_host +':'+ str(self._options.server_port)
                 # http://host:port
@@ -83,8 +89,10 @@ class KiwiWorker(threading.Thread):
                     break
                 self._event.wait(timeout=2)
                 continue
+
             except KiwiTimeLimitError:
                 break
+
             except Exception as e:
                 if self._options.is_kiwi_tdoa:
                     self._options.status = 1

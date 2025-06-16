@@ -1,5 +1,0 @@
-Scan:
- threshold:  15 # dB
- wait:        1 # seconds
- dwell:       4 # seconds
- frequencies: [6661, 6559, 6311, 8948, 8912] # kHz

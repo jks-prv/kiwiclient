@@ -1,0 +1,4 @@
+Scan:
+ wait:        1 # seconds
+ dwell:       5 # seconds
+ frequencies: [2500, 3330, 5000, 7850, 10000, 14670, 15000, 20000] # kHz, time stations

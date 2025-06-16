@@ -139,7 +139,7 @@ class KiwiSoundRecorder(KiwiSDRStream):
         fsamples /= 32768
         self._player.play(fsamples)
 
-    def _process_iq_samples_raw(self, seq, data):
+    def _process_stereo_samples_raw(self, seq, data):
         if self._options.quiet is False:
             sys.stdout.write('\rBlock: %08x' % seq)
             sys.stdout.flush()
@@ -527,6 +527,7 @@ def main():
     options.is_kiwi_wav = False
     options.is_kiwi_tdoa = False
     options.wf_cal = None
+    opt.netcat = False
     options.wideband = False
 
     gopt = options
@@ -536,7 +537,7 @@ def main():
     for i,opt in enumerate(options):
         opt.multiple_connections = multiple_connections
         opt.idx = i
-        snd_recorders.append(KiwiWorker(args=(KiwiSoundRecorder(opt),opt,run_event)))
+        snd_recorders.append(KiwiWorker(args=(KiwiSoundRecorder(opt),opt,False,run_event)))
 
     try:
         for i,r in enumerate(snd_recorders):
