@@ -68,6 +68,7 @@ def _init_common(self, options, type):
 
     self._squelch = Squelch(options) if options.sq_thresh is not None or options.scan_yaml is not None else None
     self._scan_continuous = False
+    self._options.scan_state = 'INIT'
     if options.scan_yaml is not None:
         if 'threshold' in options.scan_yaml:
             threshold = options.scan_yaml['threshold']
@@ -1258,7 +1259,6 @@ def main():
                 logging.debug('Scan file %s: %s' % (options.scan_yaml_file, documents))
                 logging.debug('Got Scan parameters from file %s: %s' % (options.scan_yaml_file, documents['Scan']))
                 options.scan_yaml = documents['Scan']
-                options.scan_state = 'INIT'
                 options.scan_time = time.time()
                 options.scan_index = 0
                 options.scan_yaml['frequencies'] = [float(f) for f in options.scan_yaml['frequencies']]
