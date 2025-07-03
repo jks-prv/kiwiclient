@@ -114,7 +114,7 @@ class KiwiSoundRecorder(KiwiSDRStream):
                     self._output_sample_rate, self._ifreq, self._ifreq * 4))
         self._init_player()
 
-    def _process_audio_samples(self, seq, samples, rssi):
+    def _process_audio_samples(self, seq, samples, rssi, fmt):
         if self._options.quiet is False:
             sys.stdout.write('\rBlock: %08x, RSSI: %6.1f' % (seq, rssi))
             sys.stdout.flush()
@@ -527,7 +527,7 @@ def main():
     options.is_kiwi_wav = False
     options.is_kiwi_tdoa = False
     options.wf_cal = None
-    opt.netcat = False
+    options.netcat = False
     options.wideband = False
 
     gopt = options
