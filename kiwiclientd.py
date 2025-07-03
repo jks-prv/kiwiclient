@@ -183,7 +183,7 @@ class KiwiSoundRecorder(KiwiSDRStream):
     # phase for frequency shift
     startph = np.float32(0)
 
-    def _process_iq_samples(self, seq, samples, rssi, gps):
+    def _process_iq_samples(self, seq, samples, rssi, gps, fmt):
         if self._options.quiet is False:
             sys.stdout.write('\rBlock: %08x, RSSI: %6.1f' % (seq, rssi))
             sys.stdout.flush()
