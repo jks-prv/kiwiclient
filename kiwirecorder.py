@@ -4,10 +4,10 @@
 ##
 ## FIXME:
 ## netcat and camping should support the usual suspects:
-##      IQ-swap, endian-reversal, option to include GPS data, squelch, resampling ...
+##      IQ-swap, endian-reversal, squelch, option to include GPS data ...
 ##
 
-VERSION = 'v1.5'
+VERSION = 'v1.6'
 
 import array, logging, os, struct, sys, time, copy, threading, os
 import gc

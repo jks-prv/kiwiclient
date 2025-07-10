@@ -2,6 +2,9 @@ CHANGE_LOG
 
 For the Github commit log see here: github.com/jks-prv/kiwiclient/commits/master
 
+v1.6  July 11, 2025
+    By request: The resampling option now works with netcat and camping modes.
+
 v1.5  June 15, 2025
     Added continuous frequency scanning capability.
         Kiwirecorder previously had a squelch-based scanning function using parameters specified
