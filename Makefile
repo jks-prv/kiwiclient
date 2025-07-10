@@ -174,22 +174,28 @@ two:
 	$(KREC) -s $(HOST_IQ1),$(HOST_IQ2) -p ($PORT) -f 77.5,60 --station=DCF77,MSF -m iq -L -5000 -H 5000
 
 
-# real mode (non-IQ) file
+# real & iq mode file
 # Should playback using standard .wav file player
 
-real:
+re real:
 	$(KREC) $(HP) $(F_PB) --tlimit=10 --log-level=debug
+rere:
+	$(KREC) $(HP) $(F_PB) --tlimit=10 --log-level=debug -r 6000
+iq:
+	$(KREC) $(HP) $(F_PB) -m iq --tlimit=10 --log_level=debug
+iqre:
+	$(KREC) $(HP) $(F_PB) -m iq --tlimit=10 --log_level=debug -r 6000
 lsb:
-	$(KREC) $(HP) -f 7200 -m lsb --tlimit=10 --log-level=debug
+	$(KREC) $(HP) $(F_PB) -m lsb --tlimit=10 --log-level=debug
 ncomp:
 	$(KREC) $(HP) $(F_PB) --ncomp
 rx8:
 #	$(KREC) $(H8) $(F_PB) --launch-delay=15 --socket-timeout=120 -u krec-RX8
 	$(KREC) $(H8) $(F_PB) -u krec-RX8
 nb:
-	$(KREC) $(HP) $F -m usb --tlimit=10 --nb --nb-gate=200 --nb-th=40
+	$(KREC) $(HP) $(F_PB) -m usb --tlimit=10 --nb --nb-gate=200 --nb-th=40
 nbtest:
-	$(KREC) $(HP) $F -m usb --tlimit=10 --nb-test --nb --nb-gate=256 --nb-th=16
+	$(KREC) $(HP) $(F_PB) -m usb --tlimit=10 --nb-test --nb --nb-gate=256 --nb-th=16
 2sec:
 	$(KREC) $(HP) $(F_PB) -q --log-level=info --dt-sec=2 
 debug:
@@ -254,9 +260,9 @@ ncwp:
 
 # resampling
 resample:
-	$(KREC) $(HP) $(F_PB) -r 12000 --tlimit=5
+	$(KREC) $(HP) $(F_PB) -r 6000 --tlimit=10
 resample_iq:
-	$(KREC) $(HP) $(F_PB) -r 6000 -m iq --tlimit=5
+	$(KREC) $(HP) $(F_PB) -r 6000 -m iq --tlimit=10
 
 samplerate_build:
 	@echo "See README file for complete build instructions."
@@ -427,13 +433,6 @@ gps2:
 	$(KREC) $(HP) $F -m iq -L -5000 -H 5000 --kiwi-wav
 
 
-# IQ file without GPS timestamps
-# Should playback using standard .wav file player
-
-iq:
-	$(KREC) $(HP) $(F_PB) -m iq --tlimit=10 --log_level=debug -r 12000
-
-
 # ALE 2G testing
 P_ALE = -f 2784 -m usb -L 300 -H 2700 --station=ALE --resample 8000 
 
@@ -449,7 +448,7 @@ kcd:
 #	$(PY) kiwiclientd.py $(HP) -f 24000 -m usb --rigctl-port=6400 --log_level info --tlimit=5
 #	$(PY) kiwiclientd.py $(HP) -f 24000 -m iq --rigctl-port=6400 --log_level info --tlimit=5 --if=200
 #	$(PY) kiwiclientd.py $(HP) -f 24001.16 -m cwn --rigctl-port=6400 --log_level debug --tlimit=5 
-	$(PY) kiwiclientd.py $(HP) -f 24001.66 --pbc -m cwn --enable-rigctl --rigctl-port=6400 --log_level debug --tlimit=5 
+	$(PY) kiwiclientd.py $(HP) -f 14670 -m usb --enable-rigctl --rigctl-port=6400 --log_level debug --tlimit=30
 #	$(PY) kiwiclientd.py $(HP) -f 24000.7 --pbc -m am -L -500 -H 500 --log_level debug --tlimit=5 
 #	$(PY) kiwiclientd.py $(HP) -f 24001.7 -m am -L -500 -H 500 --log_level debug --tlimit=5 
 
@@ -490,8 +489,8 @@ ssn:
 # process waterfall data
 
 wf:
-#	$(KREC) --wf $(HP) -f 15000 -z 0 --log_level info -u krec-WF --tlimit=5
-	$(KREC) --wf $(HP) -f 5600 -z 10 --log_level info --tlimit=20 --nolocal
+	$(KREC) --wf $(HP) -f 15000 -z 0 --log_level info -u krec-WF --tlimit=5
+#	$(KREC) --wf $(HP) -f 5600 -z 10 --log_level info --tlimit=20 --nolocal
 #	$(KREC) --wf $(HP) -f 9650 -z 4 --log_level debug -u krec-WF --tlimit=60
 
 wf2:
@@ -516,12 +515,15 @@ micro:
 # stream a Kiwi connection in a "netcat" style fashion
 
 H_NC = $(HP)
+F_NC = $(F_PB)
 
 nc:
-	$(KREC) --nc $(H_NC) -m usb -f 7850 --tlimit=10 --log=info --nc-wav --progress >nc.wav
-#	$(KREC)      $(H_NC) -m lsb -f 10000 --tlimit=10 --log=debug 
+	$(KREC) --nc $(H_NC) $(F_NC) --tlimit=10 --log=debug --nc-wav --progress >nc.wav
+#	$(KREC) --nc $(H_NC) $(F_NC) --tlimit=10 --log=info --nc-wav --progress >nc.wav
+#	$(KREC)      $(H_NC) $(F_NC) --tlimit=10 --log=debug 
+
 nciq:
-	$(KREC) --nc $(H_NC) -m iq  -f 7850 --tlimit=10 --log=debug --nc-wav --progress >nciq.wav
+	$(KREC) --nc $(H_NC) $(F_NC) -m iq --tlimit=10 --log=debug --nc-wav --progress >nciq.wav
 
 #	$(KREC) --nc $(H_NC) $(F_PB) -m am --progress --log_level info --tlimit=3
 #	$(KREC) --nc $(H_NC) -m iq -f $(HFDL_FREQ) --agc-yaml fast_agc.yaml --progress --tlimit=3 --log=debug
@@ -529,19 +531,27 @@ nciq:
 #	$(KREC) --nc $(H_NC) -m usb -f $(HFDL_FREQ) --progress --tlimit=25 --log=debug --nolocal -u foo
 #	$(KREC) --nc $(H_NC) -m cw -f $(HFDL_FREQ) --progress --tlimit=3 --log=debug --wf
 
-wf-nc:
-	$(KREC) --wf $(HP) -f 15000 -z 0 --log_level info -u krec-WF --tlimit=5 --nq --progress --nc >wf.nc
+ncre:
+	$(KREC) --nc $(H_NC) $(F_NC) --tlimit=10 --log=debug --nc-wav --progress -r 6000 >ncre.wav
+
+nciqre:
+	$(KREC) --nc $(H_NC) $(F_NC) -m iq --tlimit=10 --log=debug --nc-wav --progress -r 6000 >nciqre.wav
+
+ncwf:
+	$(KREC) --wf $(HP) $(F_NC) -z 0 --log_level info -u krec-WF --tlimit=5 --nq --progress --nc >ncwf.nc
 
 
 # camping
 CAMP = --station=$(HOST) --nc --nc-wav --log=debug --camp=0
 
 camp:
-	$(KREC) $(HP) $(CAMP) --tlimit=10 --progress >ncamp.wav
+	$(KREC) $(HP) $(CAMP) --tlimit=10 --progress >camp.wav
+campre:
+	$(KREC) $(HP) $(CAMP) --tlimit=10 --progress -r 6000 >campre.wav
 camp20:
-	$(KREC) $(HP) $(CAMP) --tlimit=20 --progress >ncamp.wav
+	$(KREC) $(HP) $(CAMP) --tlimit=20 --progress >camp.wav
 camp60:
-	$(KREC) $(HP) $(CAMP) --tlimit=60 --progress >ncamp.wav
+	$(KREC) $(HP) $(CAMP) --tlimit=60 --progress >camp.wav
 
 
 # streaming to dumphfdl

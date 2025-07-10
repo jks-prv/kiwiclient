@@ -130,7 +130,7 @@ def _setup_rx_snd_params(self, user):
         self._set_stats()
 
     if self._options.resample > 0 and not HAS_RESAMPLER:
-        self._setup_resampler()
+        _setup_resampler(self)
 
     if self._options.devel is not None:
         for pair in self._options.devel.split(','):
@@ -142,6 +142,33 @@ def _setup_rx_snd_params(self, user):
             if not (0 <= which <= 7):
                 raise Exception("--devel first arg \"%d\" of \"[0-7]:float_value\" is out of range" % which)
             self._send_message('SET devl.p%d=%.9g' % (which, value))
+
+def _setup_resampler(self):
+    if self._options.resample > 0:
+        if not HAS_RESAMPLER:
+            self._output_sample_rate = self._options.resample
+            self._ratio = float(self._output_sample_rate)/self._sample_rate
+            logging.warning("CAUTION: libsamplerate not available; low-quality linear interpolation will be used for resampling.")
+            logging.warning("See the README file instructions to build the Kiwi samplerate module.")
+            logging.warning('resampling from %g to %d Hz (ratio=%f)' % (self._sample_rate, self._options.resample, self._ratio))
+        else:
+            if hasattr(self._resampler, 'kiwi_samplerate'):
+                self._kiwi_samplerate = True
+            if self._kiwi_samplerate is True:
+                logging.warning("Using Kiwi high-quality samplerate module.")
+                self._ratio = self._options.resample / self._sample_rate
+            else:
+                ## work around a bug in python-samplerate:
+                ##  the following makes sure that ratio * 512 is an integer
+                ##  at the expense of resampling frequency precision for some resampling frequencies (it's ok for WSPR 375 Hz)
+                fs = 10*round(self._sample_rate/10) ## rounded sample rate
+                ratio = self._options.resample / fs
+                n = 512 ## KiwiSDR block length for samples
+                m = round(ratio*n)
+                self._ratio = m/n
+                logging.warning('CAUTION: using python-samplerate instead of Kiwi samplerate module containing fixes.')
+            self._output_sample_rate = self._ratio * self._sample_rate
+            logging.warning('resampling from %g to %g Hz (ratio=%f)' % (self._sample_rate, self._output_sample_rate, self._ratio))
 
 def _write_wav_header(self, fp, filesize, samplerate, num_channels, is_kiwi_wav):
     # always 2-channels if camping because can't predict what camped channel will do (mono vs stereo)
@@ -270,37 +297,10 @@ class KiwiSoundRecorder(KiwiSDRStream):
     def _setup_rx_params(self):
         _setup_rx_snd_params(self, self._options.user)
 
-    def _setup_resampler(self):
-        if self._options.resample > 0:
-            if not HAS_RESAMPLER:
-                self._output_sample_rate = self._options.resample
-                self._ratio = float(self._output_sample_rate)/self._sample_rate
-                logging.warning("CAUTION: libsamplerate not available; low-quality linear interpolation will be used for resampling.")
-                logging.warning("See the README file instructions to build the Kiwi samplerate module.")
-                logging.warning('resampling from %g to %d Hz (ratio=%f)' % (self._sample_rate, self._options.resample, self._ratio))
-            else:
-                if hasattr(self._resampler, 'kiwi_samplerate'):
-                    self._kiwi_samplerate = True
-                if self._kiwi_samplerate is True:
-                    logging.warning("Using Kiwi high-quality samplerate module.")
-                    self._ratio = self._options.resample / self._sample_rate
-                else:
-                    ## work around a bug in python-samplerate:
-                    ##  the following makes sure that ratio * 512 is an integer
-                    ##  at the expense of resampling frequency precision for some resampling frequencies (it's ok for WSPR 375 Hz)
-                    fs = 10*round(self._sample_rate/10) ## rounded sample rate
-                    ratio = self._options.resample / fs
-                    n = 512 ## KiwiSDR block length for samples
-                    m = round(ratio*n)
-                    self._ratio = m/n
-                    logging.warning('CAUTION: using python-samplerate instead of Kiwi samplerate module containing fixes.')
-                self._output_sample_rate = self._ratio * self._sample_rate
-                logging.warning('resampling from %g to %g Hz (ratio=%f)' % (self._sample_rate, self._output_sample_rate, self._ratio))
-
     def _squelch_status(self, seq, rssi, fmt):
         if not self._options.quiet:
             fmt = "" if fmt is None or self._options.log_level != 'debug' else fmt
-            if self._options.log_level != 'debug':
+            if True or self._options.log_level != 'debug':
                 sys.stdout.write('\rBlock: %08x, RSSI: %6.1f %s ' % (seq, rssi, fmt))
             else:
                 t = time.strftime('%H:%M:%S', time.gmtime())
@@ -363,7 +363,7 @@ class KiwiSoundRecorder(KiwiSDRStream):
                 ## libsamplerate resampling
                 if self._resampler is None:
                     self._resampler = Resampler(converter_type='sinc_best')
-                    self._setup_resampler()
+                    _setup_resampler(self)
                 samples = np.round(self._resampler.process(samples, ratio=self._ratio)).astype(np.int16)
             else:
                 ## resampling by linear interpolation
@@ -372,7 +372,6 @@ class KiwiSoundRecorder(KiwiSDRStream):
                 xp = np.arange(n)
                 samples = np.round(np.interp(xa,xp,samples)).astype(np.int16)
 
-        logging.debug('ws')
         self._write_samples(samples, {})
 
     def _process_iq_samples(self, seq, samples, rssi, gps, fmt):
@@ -393,7 +392,7 @@ class KiwiSoundRecorder(KiwiSDRStream):
                 ## libsamplerate resampling
                 if self._resampler is None:
                     self._resampler = Resampler(channels=2, converter_type='sinc_best')
-                    self._setup_resampler()
+                    _setup_resampler(self)
                 s = self._resampler.process(s.reshape(len(samples),2), ratio=self._ratio)
                 s = np.round(s.flatten()).astype(np.int16)
             else:
@@ -723,6 +722,21 @@ class KiwiNetcat(KiwiSDRStream):
             fmt = "" if fmt is None or self._options.log_level != 'debug' else fmt
             sys.stderr.write('\rBlock: %08x, RSSI: %6.1f %s ' % (seq, rssi, fmt))
             sys.stderr.flush()
+
+        if self._options.resample > 0:
+            if HAS_RESAMPLER:
+                ## libsamplerate resampling
+                if self._resampler is None:
+                    self._resampler = Resampler(converter_type='sinc_best')
+                    _setup_resampler(self)
+                samples = np.round(self._resampler.process(samples, ratio=self._ratio)).astype(np.int16)
+            else:
+                ## resampling by linear interpolation
+                n  = len(samples)
+                xa = np.arange(round(n*self._ratio))/self._ratio
+                xp = np.arange(n)
+                samples = np.round(np.interp(xa,xp,samples)).astype(np.int16)
+
         self._write_samples(samples, {})
 
     def _process_iq_samples(self, seq, samples, rssi, gps, fmt):
@@ -730,13 +744,34 @@ class KiwiNetcat(KiwiSDRStream):
             fmt = "" if fmt is None or self._options.log_level != 'debug' else fmt
             sys.stderr.write('\rBlock: %08x, RSSI: %6.1f %s ' % (seq, rssi, fmt))
             sys.stderr.flush()
-        if self._camping:
+
+        if self._camping or self._options.resample > 0:
             ## convert list of complex numbers into an array
             s = np.zeros(2*len(samples), dtype=np.int16)
             s[0::2] = np.real(samples).astype(np.int16)
             s[1::2] = np.imag(samples).astype(np.int16)
-            samples = s
-        self._write_samples(samples, {})
+        else:
+            s = samples
+
+        if self._options.resample > 0:
+            if HAS_RESAMPLER:
+                ## libsamplerate resampling
+                if self._resampler is None:
+                    self._resampler = Resampler(channels=2, converter_type='sinc_best')
+                    _setup_resampler(self)
+                s = self._resampler.process(s.reshape(len(samples),2), ratio=self._ratio)
+                s = np.round(s.flatten()).astype(np.int16)
+            else:
+                ## resampling by linear interpolation
+                n  = len(samples)
+                m  = int(round(n*self._ratio))
+                xa = np.arange(m)/self._ratio
+                xp = np.arange(n)
+                s  = np.zeros(2*m, dtype=np.int16)
+                s[0::2] = np.round(np.interp(xa,xp,np.real(samples))).astype(np.int16)
+                s[1::2] = np.round(np.interp(xa,xp,np.imag(samples))).astype(np.int16)
+
+        self._write_samples(s, {})
 
     def _process_waterfall_samples_raw(self, seq, samples):
         if self._options.progress is True:
@@ -763,7 +798,7 @@ class KiwiNetcat(KiwiSDRStream):
 
     def _write_samples(self, samples, *args):
         if self._options.nc_wav and self._first == True:
-            _write_wav_header(self, self._fp_stdout, 0x7ffffff0, self._sample_rate, self._num_channels, False)
+            _write_wav_header(self, self._fp_stdout, 0x7ffffff0, self._output_sample_rate, self._num_channels, False)
             self._first = False
         self._fp_stdout.write(samples)
         self._fp_stdout.flush()
@@ -1217,16 +1252,10 @@ def main():
             print('--wf-peaks note: no --wf-interp specified, so using MAX+CIC (=10)')
 
     if options.netcat:
-        if options.resample != 0:
-            raise Exception('resampling not currently supported by --netcat. Email Kiwi support if you really need it.')
         if options.sq_thresh is not None:
             raise Exception('squelch not currently supported by --netcat. Email Kiwi support if you really need it.')
         if options.is_kiwi_wav is True:
             raise Exception('GPS timestamps not currently supported by --netcat. Email Kiwi support if you really need it.')
-
-    if options.camp_chan != -1:
-        if options.resample != 0:
-            raise Exception('resampling not currently supported by --camp. Email Kiwi support if you really need it.')
 
     ### decode AGC YAML file options
     options.agc_yaml = None

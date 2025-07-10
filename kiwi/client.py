@@ -646,7 +646,7 @@ class KiwiSDRStream(KiwiSDRStreamBase):
             if self._stereo:     # stereo mode is never compressed
                 gps = dict(zip(['last_gps_solution', 'dummy', 'gpssec', 'gpsnsec'], struct.unpack('<BBII', buffer(data[0:10]))))
                 data = data[10:]
-                if self._options.netcat is True:
+                if self._options.netcat is True and self._options.resample == 0:
                     count = len(data) // 2
                     samples = np.ndarray(count, dtype=dtype, buffer=data).astype(np.int16)
                 else:
