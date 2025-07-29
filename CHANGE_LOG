@@ -28,11 +28,11 @@ v1.5  June 15, 2025
         both channels. Things also work when the camped user switches compression mode on and off.
 
         Camp mode also works with the --netcat option. For an example see the Makefile "camp" target.
-        Note that camping does not currently support resampling, squelch or GPS timestamps.
+        Note that camping does not currently support squelch or GPS timestamps.
 
     Netcat function:
         Made all the audio modes work correctly: mono/stereo, compression/no-compression.
-        Note that netcat does not currently support resampling, squelch or GPS timestamps.
+        Note that netcat does not currently support squelch or GPS timestamps.
     
     Squelch function:
         Made tail timing correct for the various audio modes: mono/stereo, compression/no-compression.

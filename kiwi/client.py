@@ -448,7 +448,7 @@ class KiwiSDRStream(KiwiSDRStreamBase):
         if name == 'redirect':
             raise KiwiRedirectError(urllib.unquote(value))
         if name == 'badp' and value == '1':
-            raise KiwiBadPasswordError('%s: bad password' % self._options.server_host)
+            raise KiwiBadPasswordError("%s: bad password OR all channels busy that don't require a password" % self._options.server_host)
         if name == 'badp' and value == '5':
             raise KiwiNoMultipleConnectionsError('%s: no multiple connections from the same IP address' % self._options.server_host)
         if name == 'down':
