@@ -1,4 +1,4 @@
-[updated 11 July 2025]
+[updated 20 August 2025]
 
 # KiwiClient
 
