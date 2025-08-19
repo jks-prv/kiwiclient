@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Modified echo client from the pywebsocket examples
 """

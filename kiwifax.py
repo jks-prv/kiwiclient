@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import array
 import codecs
 import logging

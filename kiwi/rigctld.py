@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Emulates a subset of the hamlib rigctld interface, allowing programs
 # like fldigi and wsjtx to query and change the frequency and mode of

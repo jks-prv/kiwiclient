@@ -6,6 +6,8 @@ v1.7  August 20, 2025
     Incorporated standard-chunk source code to eliminate all the problems with Python 13 and
         Debian 13 not being able to find and include the correct package.
 
+    Most .py files: fix/add "#!/usr/bin/env python3" (thanks Rob)
+
 v1.6  July 11, 2025
     By request: The resampling option now works with netcat and camping modes.
 

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 ## -*- python -*-
 #
 # Streams sound from a kiwisdr channel to a (virtual or not) sound card,
