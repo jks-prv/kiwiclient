@@ -2,7 +2,7 @@
 
 # KiwiClient
 
-This is the version v1.6 Python client for KiwiSDR. It allows you to:
+This is the version v1.7 Python client for KiwiSDR. It allows you to:
 
 * Receive data streams with audio samples, IQ samples, S-meter and waterfall data
 * Issue commands to the KiwiSDR
@@ -28,8 +28,6 @@ Python3 is required.
 Make sure the Python package `'numpy'` is installed.  
 On many Linux distributions the command would be similar to `'apt install python3-numpy'`  
 On macOS try `'pip3 install numpy'` or perhaps `'python3 -m pip install numpy'`
-
-Same for package `'chunkmuncher'` if using Python3.13 or later (as module `'chunk'` was removed in 3.13)
 
 ## Resampling
 

@@ -2,6 +2,10 @@ CHANGE_LOG
 
 For the Github commit log see here: github.com/jks-prv/kiwiclient/commits/master
 
+v1.7  August 20, 2025
+    Incorporated standard-chunk source code to eliminate all the problems with Python 13 and
+        Debian 13 not being able to find and include the correct package.
+
 v1.6  July 11, 2025
     By request: The resampling option now works with netcat and camping modes.
 

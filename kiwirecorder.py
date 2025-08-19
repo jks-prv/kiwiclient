@@ -7,7 +7,7 @@
 ##      IQ-swap, endian-reversal, squelch, option to include GPS data ...
 ##
 
-VERSION = 'v1.6'
+VERSION = 'v1.7'
 
 import array, logging, os, struct, sys, time, copy, threading, os
 import gc
