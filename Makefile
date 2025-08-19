@@ -334,7 +334,7 @@ wav:
 
 
 # check an iq .wav file recorded with --kiwi-wav
-# make wav f=*.wav
+# make proc f=*.wav
 proc: oct/read_kiwi_iq_wav.oct
 	octave-cli --eval "proc_kiwi_iq_wav('$(f)',255)"
 
@@ -430,7 +430,7 @@ no-user:
 # IQ file with GPS timestamps
 
 gps:
-	$(KREC) $(HP) -f 77.5  -L -5000 -H 5000 -m iq --station=DCF77 --kiwi-wav --log_level info
+	$(KREC) $(HP) -f 77.5  -L -5000 -H 5000 -m iq --fn=gps --kiwi-wav --log_level info --tlimit=30
 gps2:
 	$(KREC) $(HP) $F -m iq -L -5000 -H 5000 --kiwi-wav
 

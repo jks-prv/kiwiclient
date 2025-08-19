@@ -110,7 +110,9 @@ It provides the following methods which can be used in derived classes:
 * If a directory with name `gnss_pos/` exists, a text file `gnss_pos/[name].txt` will be created which contains latitude and longitude as provided by the KiwiSDR; existing files are overwritten.
 
 ### Working with the recorded .wav files
-* There is an octave extension for reading such WAV files, see `read_kiwi_iq_wav.cc` where the details of the non-standard WAV chunk can be found; it needs to be compiled in this way: `mkoctfile read_kiwi_iq_wav.cc`.
-* For using read_kiwi_iq_wav an octave function `proc_kiwi_iq_wav.m` is provided; type `help proc_kiwi_iq_wav` in octave for documentation.
+* There is an Octave extension for reading such WAV files, see `read_kiwi_iq_wav.cc` where the details of the non-standard WAV chunk can be found; it needs to be compiled in this way: `make install`.
+* For using read_kiwi_iq_wav an Octave function `proc_kiwi_iq_wav.m` is provided; type `help proc_kiwi_iq_wav` in Octave for documentation.
+* There is a Makefile rule to invoke the above: `make proc f=filename.wav`
+* For checking the integrity of a .wav file using `client/wavreader.py` run: `make wav f=filename.wav`
 
 [end-of-document]

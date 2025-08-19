@@ -7,6 +7,11 @@ except ImportError:
     import collections as collectionsAbc
 import struct
 import numpy as np
+
+# so chunk module is found when doing "python3 kiwi/wavreader.py"
+# in kiwiclient top-level directory
+import sys, os
+sys.path.insert(0, os.path.abspath('.'))
 from chunk import Chunk # local copy from standard-chunk
 
 class KiwiIQWavError(Exception):
