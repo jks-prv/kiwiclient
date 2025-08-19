@@ -488,7 +488,8 @@ class KiwiWaterfallRecorder(KiwiSDRStream):
         self._start_ts = time.gmtime()
         self._start_time = None
         self._last_gps = dict(zip(['last_gps_solution', 'dummy', 'gpssec', 'gpsnsec'], [0,0,0,0]))
-        self.wf_pass = 0
+        self._wf_pass = 0
+        self._p_unsorted_avg = []
         self._rows = []
         self._cmap_r = array.array('B')
         self._cmap_g = array.array('B')
@@ -563,17 +564,23 @@ class KiwiWaterfallRecorder(KiwiSDRStream):
     
     def _process_waterfall_samples(self, seq, samples):
         baseband_freq = self._remove_freq_offset(self._freq)
+        span = self.zoom_to_span(self._options.zoom)
+        start = baseband_freq - span/2
+        stop  = baseband_freq + span/2
         nbins = len(samples)
         bins = nbins-1
         i = 0
         pwr = []
+        p_unsorted = []
         pixels = array.array('B')
-        do_wf = self._options.wf_png and (not self._options.wf_auto or (self._options.wf_auto and self.wf_pass != 0))
+        do_wf = self._options.wf_png and (not self._options.wf_auto or (self._options.wf_auto and self._wf_pass != 0))
 
         for s in samples:
-            dBm = s - 255
+            dBm = int(s) - 255
+            #print(f'{i}: {s} {type(s)} {dBm} {type(dBm)} ')
             if i > 2 and dBm > -190:    # skip DC offset notch in first two bins and also masked areas
                 pwr.append({ 'dBm':dBm, 'i':i })
+            p_unsorted.append(dBm)
             i = i+1
             
             if do_wf:
@@ -582,8 +589,83 @@ class KiwiWaterfallRecorder(KiwiSDRStream):
                 pixels.append(self._cmap_g[ci])
                 pixels.append(self._cmap_b[ci])
         
+        if self._options.snr != 0:
+            pwr.sort(key = by_dBm)
+            length = len(pwr)
+            noise = pwr[int(0.50 * length)]['dBm']
+            signal = pwr[int(0.95 * length)]['dBm']
+            logging.info("--snr: pass %d SNR %d" % (self._wf_pass, signal - noise))
+
+            if self._wf_pass == 0:
+                self._p_unsorted_avg = p_unsorted
+                self._wf_pass = self._wf_pass+1
+                return
+            
+            if self._wf_pass < self._options.snr:
+                #print(f'pass={self._wf_pass} len={len(self._p_unsorted_avg)}')
+                i = 0
+                for _p in self._p_unsorted_avg:
+                    self._p_unsorted_avg[i] = self._p_unsorted_avg[i] + p_unsorted[i]
+                    i = i+1
+                self._wf_pass = self._wf_pass+1
+                return
+
+            run = 0
+            self.prev_dBm = -190
+            th = -82
+            rg = 25
+            runlen = 10
+            fs = start
+            kpp = span/1024
+            have_run = 0
+
+            i = 0
+            for _p in self._p_unsorted_avg:
+                self._p_unsorted_avg[i] = self._p_unsorted_avg[i] / self._options.snr
+                i = i+1
+
+            i = 0
+            for dBm in self._p_unsorted_avg:
+                dBm = dBm + self._options.wf_cal
+                p = self.prev_dBm
+                f = fs + i*kpp
+                diff = abs(dBm-p)
+                logging.debug(f'{f:.0f}: {dBm:.0f} {p:.0f} {diff:.0f}')
+                if dBm >= th and p >= th:
+                    if diff <= rg:
+                        if run == 0:
+                            self._last_start = f;
+                            self._last_idx = i;
+                        run = run+1
+                        logging.debug(f'  {run}')
+                    else:
+                        if run > runlen:
+                            have_run = run
+                        run = 0;
+                        logging.debug(f'  RESET delta')
+                else:
+                    if run:
+                        logging.debug(f'  RESET level')
+                    if run > runlen:
+                        have_run = run
+                    run = 0
+                if have_run:
+                    logging.info(f'--snr: run={have_run} {self._last_start:.0f}-{f:.0f}({have_run*kpp:.0f}) ==================================================')
+                    for j in range(self._last_idx, i+1):
+                        self._p_unsorted_avg[j] = -190      # notch the run
+                    have_run = 0
+                self.prev_dBm = dBm
+                i = i+1
+
+            pwr = []
+            for i in range(1024):
+                dBm = self._p_unsorted_avg[i]
+                if i > 2 and dBm > -190:    # skip DC offset notch in first two bins and also masked & notched areas
+                    pwr.append({ 'dBm':dBm, 'i':i })
+
         pwr.sort(key = by_dBm)
         length = len(pwr)
+        #print(f'{pwr}')
         pmin = pwr[0]['dBm'] + self._options.wf_cal
         bmin = pwr[0]['i']
         pmax = pwr[length-1]['dBm'] + self._options.wf_cal
@@ -592,8 +674,14 @@ class KiwiWaterfallRecorder(KiwiSDRStream):
         start = baseband_freq - span/2
         
         if (not self._options.wf_png and not self._options.quiet) or (self._options.wf_png and self._options.not_quiet):
-            logging.info("wf samples: %d bins, min %d dB @ %.2f kHz, max %d dB @ %.2f kHz"
-                  % (nbins, pmin, start + span*bmin/bins, pmax, start + span*bmax/bins))
+            noise = pwr[int(0.50 * length)]['dBm']
+            signal = pwr[int(0.95 * length)]['dBm']
+            logging.info("wf samples: %d bins, min %d dB @ %.2f kHz, max %d dB @ %.2f kHz, SNR %d"
+                  % (nbins, pmin, start + span*bmin/bins, pmax, start + span*bmax/bins, signal - noise))
+
+        if self._options.snr != 0:
+            self._stop = True
+            return
 
         if self._options.wf_peaks > 0:
             with open(self._get_output_filename("_peaks.txt"), 'a') as fp:
@@ -604,7 +692,7 @@ class KiwiWaterfallRecorder(KiwiSDRStream):
                     fp.write("%d %.2f %d  " % (bin_i, start + span*bin_f, pwr[j]['dBm'] + self._options.wf_cal))
                 fp.write("\n")
 
-        if self._options.wf_png and self._options.wf_auto and self.wf_pass == 0:
+        if self._options.wf_png and self._options.wf_auto and self._wf_pass == 0:
             noise = pwr[int(0.50 * length)]['dBm']
             signal = pwr[int(0.95 * length)]['dBm']
             # empirical adjustments
@@ -615,7 +703,7 @@ class KiwiWaterfallRecorder(KiwiSDRStream):
             self._options.mindb = noise
             self._options.maxdb = signal
             logging.info("--wf_auto: mindb %d, maxdb %d, cal %d dB" % (self._options.mindb, self._options.maxdb, self._options.wf_cal))
-        self.wf_pass = self.wf_pass+1
+        self._wf_pass = self._wf_pass+1
         if do_wf is True:
             self._rows.append(pixels)
 
@@ -1151,6 +1239,10 @@ def main():
                       dest='wf_cal',
                       type='int', default=None,
                       help='Waterfall calibration correction (overrides Kiwi default value)')
+    group.add_option('--snr',
+                      dest='snr',
+                      type='int', default=0,
+                      help='Compute SNR value after specified number of waterfall averages')
     parser.add_option_group(group)
 
     group = OptionGroup(parser, "Extension connection options", "")

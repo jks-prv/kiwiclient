@@ -413,16 +413,18 @@ slots14:
 	$(KREC) --station=14 $(T_PARAMS) &
 
 BAD =  --test-mode --log_level=debug --nolocal --tlimit=30
-no_api_snd:
+no-api-snd:
 	$(KREC) $(HP) $(F_PB) --no-api --bad-cmd --user=bad $(BAD)
-no_api_snd_wf:
+no-api-snd-wf:
 	$(KREC) $(HP) --snd --wf --no-api --bad-cmd --user=bad2 $(BAD)
-no_api_wf:
+no-api-wf:
 	$(KREC) $(HP) --wf --no-api --bad-cmd --user=spaces $(BAD)
-no_api_user:
+no-api-user:
 	$(KREC) $(HP) --no-api --user=no_api_test $(BAD)
-no_api_ext:
+no-api-ext:
 	$(KREC) $(HP) --no-api --bad-cmd --ext=DRM --test-mode --quiet --snd $(BAD)
+no-user:
+	$(KREC) $(HP) --no-api --user=none $(BAD)
 
 
 # IQ file with GPS timestamps
@@ -449,6 +451,7 @@ kcd:
 #	$(PY) kiwiclientd.py $(HP) -f 24000 -m iq --rigctl-port=6400 --log_level info --tlimit=5 --if=200
 #	$(PY) kiwiclientd.py $(HP) -f 24001.16 -m cwn --rigctl-port=6400 --log_level debug --tlimit=5 
 	$(PY) kiwiclientd.py $(HP) -f 14670 -m usb --enable-rigctl --rigctl-port=6400 --log_level debug --tlimit=30
+#	$(PY) kiwiclientd.py $(HP) -f 10136 -m usb --enable-rigctl --rigctl-port=6400 --log_level debug --tlimit=30
 #	$(PY) kiwiclientd.py $(HP) -f 24000.7 --pbc -m am -L -500 -H 500 --log_level debug --tlimit=5 
 #	$(PY) kiwiclientd.py $(HP) -f 24001.7 -m am -L -500 -H 500 --log_level debug --tlimit=5 
 
@@ -502,6 +505,13 @@ wf-png:
 wf-peaks:
 	$(KREC) --wf $(HP) -f 15000 -z 0 --log_level info -u krec-WF --tlimit=2 --mindb=-100 --maxdb=-20 --nq --speed=1 --wf-peaks=5
 #	$(KREC) --wf $(HP) -f 1000 -z 4 --log_level info -u krec-WF --tlimit=5 --mindb=-100 --maxdb=-20 --nq --speed=1 -wf-peaks=5
+
+
+SNR = $(HP)
+
+snr:
+	$(KREC) --wf $(SNR) -f 15000 -z 0 --log_level=debug -u ZL4VO-snr --tlimit=15 --snr=5
+#	$(KREC) --wf $(SNR) -f 10000 -z 1 --log_level=info -u ZL4VO-snr --tlimit=15 --snr=5
 
 micro:
 #	$(PY) microkiwi_waterfall.py --help
