@@ -32,6 +32,11 @@ function [x,xx,fs,last_gpsfix]=proc_kiwi_iq_wav(fn, max_last_gpsfix)
   ## filter x
   x = x(idx);
   n = numel(x); ## from here on n is always >=2
+  if n<2
+    xx          = {};
+    last_gpsfix = 255;
+    return
+  endif
 
   ## indices of fresh GNSS timestamps
   idx_ts = find(diff(cat(1, x.gpslast)) < 0);

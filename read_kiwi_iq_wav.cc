@@ -101,8 +101,6 @@ DEFUN_DLD (read_kiwi_iq_wav, args, nargout, "[d,sample_rate]=read_kiwi_wav(\"<wa
   octave_value_list retval;
 
   const std::string filename = args(0).string_value();
-  if (error_state)
-    return retval;
 
   std::ifstream file(filename.c_str(), std::ios::binary);
   if (!file)
