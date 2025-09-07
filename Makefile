@@ -121,7 +121,7 @@ drm-wf-auto: drm-info
 
 # record Kiwi audio, waterfall and stats
 drm-snd-wf: drm-info
-	$(KREC) $(DRM) --tlimit=30 --snd --quiet --wf --z 9 --speed 4 --wf-png --wf-auto --ext=DRM  --stats --log-level=warn
+	$(KREC) $(DRM) --tlimit=30 --snd --quiet --wf --z 9 --speed 4 --wf-png --wf-auto --ext=DRM --stats --log-level=warn
 
 
 # DRM testing
@@ -137,9 +137,9 @@ drm-1044:
 drm-9620:
 #	$(KREC) $(DRM) -s emeraldsdr.ddns.net -f 9620 --filename=AIR.9620.12k.iq --mode=iq --tlimit=10 --log-level=info
 #	$(KREC) $(DRM) -s emeraldsdr.ddns.net -f 9620 --filename=AIR.9620.12k.drm --ext=DRM --snd --s-meter=0 --sdt-sec=1 --tlimit=30 --log-level=info --ts
-	$(KREC) -s emeraldsdr.ddns.net  -p 8073 -f 9620 -L -5000 -H 5000 --mode=drm --ext=DRM --snd --user=DRM-test --filename=AIR.9620.12k.drm --s-meter=0 --sdt-sec=1 --tlimit=30 --timestamp --log-level=info
+	$(KREC) -s emeraldsdr.ddns.net -p 8073 -f 9620 -L -5000 -H 5000 --mode=drm --ext=DRM --snd --user=DRM-test --filename=AIR.9620.12k.drm --s-meter=0 --sdt-sec=1 --tlimit=30 --timestamp --log-level=info
 drm-5910:
-	$(KREC) -s df0twn.dnsuser.de  -p 8073 -f 5910 -L -5000 -H 5000 --mode=drm --ext=DRM --snd --user=DRM-test --filename=RRI.5910.12k.drm --s-meter=0 --sdt-sec=1 --tlimit=30 --timestamp --log-level=info
+	$(KREC) -s df0twn.dnsuser.de -p 8073 -f 5910 -L -5000 -H 5000 --mode=drm --ext=DRM --snd --user=DRM-test --filename=RRI.5910.12k.drm --s-meter=0 --sdt-sec=1 --tlimit=30 --timestamp --log-level=info
 
 drm-bug:
 #	$(KREC) $(DRM) --tlimit=40 --test-mode --snd --wf --z 5
@@ -234,11 +234,11 @@ scan-sq:
 # wideband
 wbr:
 	@rm -f *.wav
-	$(KREC) $(HP)    -f 10000 -m iq --ncomp --station=wb --tlimit=30 --log_level debug --nolocal
+	$(KREC) $(HP) -f 10000 -m iq --ncomp --station=wb --tlimit=30 --log_level debug --nolocal
 
 wb:
 	@rm -f *.wav
-	$(KREC) $(HP)    -f 10000 -m iq --ncomp --station=wb --tlimit=1000 --log_level debug --wb
+	$(KREC) $(HP) -f 10000 -m iq --ncomp --station=wb --tlimit=1000 --log_level debug --wb
 
 wbw:
 	@rm -f *.wav
@@ -284,7 +284,7 @@ FOFF = -L 470 -H 530 -m cwn --snd --wf --z 14 --speed 2 --wf-png --wf-auto --log
 foff:
 #	$(KREC) $(HP) --tlimit=10 --log_level=debug -f 24000.14 $(FOFF)
 #	$(KREC) $(HP) --tlimit=10 -f 124000.14 $(FOFF)
-	$(KREC) $(HP) --tlimit=60  -f 124000.64 -o 100000 $(FOFF)
+	$(KREC) $(HP) --tlimit=60 -f 124000.64 -o 100000 $(FOFF)
 
 
 # S-meter
@@ -412,7 +412,7 @@ slots14:
 	$(KREC) --station=13 $(T_PARAMS) &
 	$(KREC) --station=14 $(T_PARAMS) &
 
-BAD =  --test-mode --log_level=debug --nolocal --tlimit=30
+BAD = --test-mode --log_level=debug --nolocal --tlimit=30
 no-api-snd:
 	$(KREC) $(HP) $(F_PB) --no-api --bad-cmd --user=bad $(BAD)
 no-api-snd-wf:
@@ -430,7 +430,7 @@ no-user:
 # IQ file with GPS timestamps
 
 gps:
-	$(KREC) $(HP) -f 77.5  -L -5000 -H 5000 -m iq --fn=gps --kiwi-wav --log_level info --tlimit=30
+	$(KREC) $(HP) -f 77.5 -L -5000 -H 5000 -m iq --fn=gps --kiwi-wav --log_level info --tlimit=30
 gps2:
 	$(KREC) $(HP) $F -m iq -L -5000 -H 5000 --kiwi-wav
 
@@ -505,6 +505,9 @@ wf-png:
 wf-peaks:
 	$(KREC) --wf $(HP) -f 15000 -z 0 --log_level info -u krec-WF --tlimit=2 --mindb=-100 --maxdb=-20 --nq --speed=1 --wf-peaks=5
 #	$(KREC) --wf $(HP) -f 1000 -z 4 --log_level info -u krec-WF --tlimit=5 --mindb=-100 --maxdb=-20 --nq --speed=1 -wf-peaks=5
+
+wf-bug:
+	$(KREC) $(HP) -f 15000 -m usb --tlimit=120 --snd --wf --z 0 --speed 0 --wf-comp  --wf-auto --stats --log-level=debug
 
 
 SNR = $(HP)
@@ -592,9 +595,9 @@ tun:
 
 # test connect/busy timeout/retries
 cto:
-	$(KREC) -s 1.2.3.4 -m am -f 10000  --socket-timeout 1 --connect-timeout=1 --connect-retries=5
+	$(KREC) -s 1.2.3.4 -m am -f 10000 --socket-timeout 1 --connect-timeout=1 --connect-retries=5
 bto:
-	$(KREC) $(HP) -m am -f 10000  --busy-timeout=2 --busy-retries=3
+	$(KREC) $(HP) -m am -f 10000 --busy-timeout=2 --busy-retries=3
 
 
 # for copying to remote hosts
