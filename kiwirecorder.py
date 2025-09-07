@@ -534,8 +534,7 @@ class KiwiWaterfallRecorder(KiwiSDRStream):
         if self._options.no_api:
             self._setup_no_api()
             return
-        #self._set_wf_comp(True)
-        self._set_wf_comp(False)
+        self._set_wf_comp(self._options.wf_comp)
         self._set_wf_interp(self._options.interp)
         self.set_name(self._options.user)
 
@@ -802,7 +801,7 @@ class KiwiNetcat(KiwiSDRStream):
             self.set_name(user)
             self._set_maxdb_mindb(-10, -110)    # needed, but values don't matter
             self._set_zoom_cf(0, 0)
-            self._set_wf_comp(False)
+            self._set_wf_comp(self._options.wf_comp)
             self._set_wf_speed(1)   # 1 Hz update
 
     def _process_audio_samples(self, seq, samples, rssi, fmt):
@@ -1239,6 +1238,10 @@ def main():
                       dest='wf_cal',
                       type='int', default=None,
                       help='Waterfall calibration correction (overrides Kiwi default value)')
+    group.add_option('--wf-comp',
+                      dest='wf_comp',
+                      action='store_true', default=False,
+                      help='Enable waterfall compression')
     group.add_option('--snr',
                       dest='snr',
                       type='int', default=0,

@@ -376,6 +376,7 @@ class KiwiSDRStream(KiwiSDRStreamBase):
         # ignore command line compression setting in camp mode because compression
         # is determined by audio stream flag
         if self._camp_chan == -1 and not self._camping:
+            #logging.debug("SND compression=%d" % (1 if comp else 0))
             self._compression = comp
             self._send_message('SET compression=%d' % (1 if comp else 0))
 
@@ -383,6 +384,7 @@ class KiwiSDRStream(KiwiSDRStreamBase):
         self._send_message('SET STATS_UPD ch=0')
 
     def _set_wf_comp(self, comp):
+        #logging.debug("WF wf_comp=%d" % (1 if comp else 0))
         self._compression = comp
         self._send_message('SET wf_comp=%d' % (1 if comp else 0))
 
