@@ -552,8 +552,7 @@ class KiwiWaterfallRecorder(KiwiSDRStream):
         if self._options.wf_png is True:
             logging.info("--wf_png: mindb %d, maxdb %d, cal %d dB" % (self._options.mindb, self._options.maxdb, self._options.wf_cal))
 
-    def _waterfall_color_index_max_min(self, value):
-        db_value = -(255 - value)       # 55..255 => -200..0 dBm
+    def _waterfall_color_index_max_min(self, db_value):
         db_value = clamp(db_value + self._options.wf_cal, self._options.mindb, self._options.maxdb)
         relative_value = db_value - self._options.mindb
         fullscale = self._options.maxdb - self._options.mindb
@@ -575,7 +574,7 @@ class KiwiWaterfallRecorder(KiwiSDRStream):
         do_wf = self._options.wf_png and (not self._options.wf_auto or (self._options.wf_auto and self._wf_pass != 0))
 
         for s in samples:
-            dBm = int(s) - 255
+            dBm = int(s) - 255      # 55..255 => -200..0 dBm
             #print(f'{i}: {s} {type(s)} {dBm} {type(dBm)} ')
             if i > 2 and dBm > -190:    # skip DC offset notch in first two bins and also masked areas
                 pwr.append({ 'dBm':dBm, 'i':i })
@@ -583,7 +582,7 @@ class KiwiWaterfallRecorder(KiwiSDRStream):
             i = i+1
             
             if do_wf:
-                ci = self._waterfall_color_index_max_min(s)
+                ci = self._waterfall_color_index_max_min(dBm)
                 pixels.append(self._cmap_r[ci])
                 pixels.append(self._cmap_g[ci])
                 pixels.append(self._cmap_b[ci])
