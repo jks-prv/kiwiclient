@@ -31,7 +31,7 @@ class KiwiSoundRecorder(KiwiSDRStream):
         self.set_mod(mod, lp_cut, hp_cut, self._freq)
         self.set_agc(on=True)
 
-    def _process_iq_samples(self, seq, samples, rssi, gps):
+    def _process_iq_samples(self, seq, samples, rssi, gps, fmt):
         if self._num_skip != 0:
             if seq < 2:
                 print('IQ: skipping seq=', seq)
