@@ -412,13 +412,13 @@ class KiwiFax(KiwiSDRStream):
         self._black_level = (2 * (RADIOFAX_BLACK_FREQ - RADIOFAX_STARTSTOP_FREQ) / sample_rate) + contrast + shift
         self._fc_factor = 2 * self._bin_size / sample_rate
 
-    def _process_audio_samples(self, seq, samples, rssi):
+    def _process_audio_samples(self, seq, samples, rssi, fmt):
         k = 1 / 32768.0
         samples = [ x * k for x in samples ]
         samples = self._iqconverter.process(samples)
         self._process_samples(seq, samples, rssi)
 
-    def _process_iq_samples(self, seq, samples, rssi, gps):
+    def _process_iq_samples(self, seq, samples, rssi, gps, fmt):
         k = 1 / 32768.0
         samples = [ x * k for x in samples ]
         self._process_samples(seq, samples, rssi)
