@@ -151,9 +151,15 @@ DEFUN_DLD (read_kiwi_iq_wav, args, nargout, "[d,sample_rate]=read_kiwi_iq_wav(\"
         file.read((char*)(&q), sizeof(q));
         a(j) = std::complex<float>(i/32768.0f, q/32768.0f);
       }
-      if (j != n)
-        error("incomplete 'data' chunk");
-      cell_z(data_counter++) = a;
+      if (j != n) {
+        printf("incomplete 'data' chunk %d %d\n",j,n);
+        cell_last.resize(data_counter);    // was n element long
+        cell_gpssec.resize(data_counter);
+        cell_gpsnsec.resize(data_counter);
+        cell_z.resize(data_counter);
+      }
+      else
+        cell_z(data_counter++) = a;
     } else if (c.id() == "kiwi") {
       file.seekg(pos);
       chunk_kiwi kiwi;
