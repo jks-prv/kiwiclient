@@ -27,7 +27,7 @@ function [x,xx,fs,last_gpsfix]=proc_kiwi_iq_wav(fn, max_last_gpsfix)
   endif
   x           = x(2:end); # omit the first chunk of 256 samples
   last_gpsfix = max(cat(1,x.gpslast));
-  idx         = find(cat(1,x.gpslast) < max_last_gpsfix);
+  idx         = find(cat(1,x.gpslast) <= max_last_gpsfix);
 
   ## filter x
   x = x(idx);
