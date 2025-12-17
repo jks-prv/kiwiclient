@@ -61,7 +61,8 @@ The following demo programs are provided. Use the `--help` argument to see all p
 * `kiwifax`: Decode radiofax and save as PNGs, with auto start, stop, and phasing.
 * `kiwiclientd`: Plays Kiwi audio on sound cards (real & virtual) for use by programs like fldigi and wsjtx.
     Implements hamlib rigctl network interface so the Kiwi freq & mode can be controlled by these programs.
-* `kiwi_nc`: Deprecated. Use the `--nc` option with `kiwirecorder`. Command line pipeline tool in the style of `netcat`.
+* Streaming: The former `kiwi_nc` program is deprecated. Use the `--nc` option with `kiwirecorder` instead.
+Gives you a command line pipeline tool in the style of `netcat`.
 Example: streaming IQ samples to `dumphfdl` (see the `Makefile` target `dumphfdl`).
 
 The `Makefile` contains numerous examples of how to use these programs.
