@@ -517,10 +517,10 @@ dx-list dx:
 	cat dx.json
 
 dx-add:
-	$(KREC) $(HP) --admin --pw=apai64 -f 10 --mode=cw --dx-ident='foo bar' --dx-type=3 --dx-add --log_level=info
+	$(KREC) $(HP) --admin -f 10 --mode=cw --dx-ident='foo bar' --dx-type=3 --dx-add --log_level=info
 
 dx-del:
-	$(KREC) $(HP) --admin --pw=apai64 --dx-del=0 --log_level=info
+	$(KREC) $(HP) --admin --dx-del=0 --log_level=info
 
 
 SNR = $(HP)
