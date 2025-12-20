@@ -2,6 +2,19 @@ CHANGE_LOG
 
 For the Github commit log see here: github.com/jks-prv/kiwiclient/commits/master
 
+v1.8  December 20, 2025
+    Added HTTP redirection support to handle the kiwisdr.com secondary proxy server.
+    
+    Added support for stored database DX label editing: list, add, delete (requested by DL5NEN)
+    See the Makefile dx-list, dx-add, dx-del targets for usage examples.
+    
+    Fix from jmfriedt (thanks!) "Handle incomplete data segment #156"
+    
+    Removed kiwi_nc.py as it is now fully deprecated. Use the --nc option with kiwirecorder.
+    See the "nc" targets in the Makefile.
+    
+    Initial work allowing netcat mode to send data in the reverse direction (back to the Kiwi).
+
 v1.7  August 20, 2025
     Incorporated standard-chunk source code to eliminate all the problems with Python 13 and
         Debian 13 not being able to find and include the correct package.

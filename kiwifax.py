@@ -309,7 +309,6 @@ class KiwiFax(KiwiSDRStream):
     def __init__(self, options):
         super(KiwiFax, self).__init__()
         self._options = options
-        self._reader = True
         self._options.idx = 0
         self._options.stats = True
         self._type = 'SND'

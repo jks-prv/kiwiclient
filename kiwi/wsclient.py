@@ -310,15 +310,19 @@ class ClientHandshakeProcessor(ClientHandshakeBase):
         m = re.match('HTTP/\\d+.\\d+ (\\d\\d\\d) .*\r\n', status_line)
         if m is None:
             raise ClientHandshakeError('Wrong status line format: %r' % status_line)
+        
+        fields = self._read_fields()
         status_code = m.group(1)
+        if status_code == '301' or status_code == '307' or status_code == '308':    # HTTP redirection
+            return _get_mandatory_header(fields, 'Location'), status_code
+        if status_code == '404' and "proxy" in self._host and "kiwisdr.com" in self._host:
+            raise ClientHandshakeError('Proxied Kiwi is not online')
         if status_code != '101':
-            self._logger.debug('Unexpected status code %s with following headers: %r', status_code, self._read_fields())
+            self._logger.debug('Unexpected status code %s with following headers: %r', status_code, fields)
             raise ClientHandshakeError('Expected HTTP status code 101 but found %r' % status_code)
 
         self._logger.debug('Received valid Status-Line')
         self._logger.debug('Start reading headers until we see an empty line')
-
-        fields = self._read_fields()
 
         ch = _receive_bytes(self._socket, 1)
         if ch != '\n':  # 0x0A
@@ -389,6 +393,8 @@ class ClientHandshakeProcessor(ClientHandshakeBase):
             raise ClientHandshakeError('Requested %s, but the server rejected it' % common.DEFLATE_FRAME_EXTENSION)
         if (self._use_permessage_deflate and not permessage_deflate_accepted):
             raise ClientHandshakeError('Requested %s, but the server rejected it' % common.PERMESSAGE_DEFLATE_EXTENSION)
+        
+        return None, status_code
 
         # TODO(tyoshino): Handle Sec-WebSocket-Protocol
         # TODO(tyoshino): Handle Cookie, etc.

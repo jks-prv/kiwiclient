@@ -537,7 +537,7 @@ def main():
     for i,opt in enumerate(options):
         opt.multiple_connections = multiple_connections
         opt.idx = i
-        snd_recorders.append(KiwiWorker(args=(KiwiSoundRecorder(opt),opt,False,run_event)))
+        snd_recorders.append(KiwiWorker(args=(KiwiSoundRecorder(opt),opt,True,False,run_event)))
 
     try:
         for i,r in enumerate(snd_recorders):

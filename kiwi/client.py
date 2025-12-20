@@ -108,7 +108,7 @@ class KiwiCampError(KiwiError):
     pass
 class KiwiBadPasswordError(KiwiError):
     pass
-class KiwiNoMultipleConnectionsError(KiwiError):
+class KiwiConnectionError(KiwiError):
     pass
 class KiwiTimeLimitError(KiwiError):
     pass
@@ -133,6 +133,7 @@ class KiwiSDRStreamBase(object):
         self._lowcut = 0
         self._highcut = 0
         self._freq = 0
+        self._reader = True
         self._stream = None
 
     def get_mod(self):
@@ -157,11 +158,20 @@ class KiwiSDRStreamBase(object):
 
     def _prepare_stream(self, host, port, which):
         self._stream_name = which
-        self._socket = socket.create_connection(address=(host, port), timeout=self._options.socket_timeout)
         uri = '%s/%d/%s%s' % ('/wb' if self._options.wideband else '', self._options.ws_timestamp, which, '?camp' if self._camp_chan != -1 else '')
-        logging.debug('uri=<%s>' % uri)
-        handshake = ClientHandshakeProcessor(self._socket, host, port)
-        handshake.handshake(uri)
+        
+        while True:
+            logging.info('URL: %s:%d%s' % (host, port, uri))
+            self._socket = socket.create_connection(address=(host, port), timeout=self._options.socket_timeout)
+            handshake = ClientHandshakeProcessor(self._socket, host, port)
+            location, status_code = handshake.handshake(uri)
+            if status_code == '101':
+                break
+            # handle HTTP redirection
+            #logging.debug('redir location=%s' % location)
+            host = urllib.urlparse(location).hostname
+            #logging.debug('redir host=%s' % host)
+            logging.warn('HTTP %s redirect' % status_code)
 
         request = ClientRequest(self._socket)
         request.ws_version = mod_pywebsocket.common.VERSION_HYBI13
@@ -210,6 +220,9 @@ SND_FLAG_STEREO        = 0x08
 SND_FLAG_COMPRESSED    = 0x10
 SND_FLAG_LITTLE_ENDIAN = 0x80
 
+from queue import Queue
+q_stream_closed = Queue()
+
 class KiwiSDRStream(KiwiSDRStreamBase):
     """KiwiSDR WebSocket stream client."""
 
@@ -239,6 +252,7 @@ class KiwiSDRStream(KiwiSDRStreamBase):
         self._comp_set = False
         self._decoder_index = 0
         self._decoder_prev = 0
+        self._last_snd_keepalive = self._last_wf_keepalive = 0
 
         self._default_passbands = {
             "am":  [ -4900, 4900 ],
@@ -307,14 +321,15 @@ class KiwiSDRStream(KiwiSDRStreamBase):
             baseband_orig = baseband_freq
             baseband_freq = baseband_freq - pbc
             logging.debug('set_mod: freq=%.2f pbc_offset=%.2f pbc_freq=%.2f' % (baseband_orig, pbc, baseband_freq - pbc))
-        self._send_message('SET mod=%s low_cut=%d high_cut=%d freq=%.3f' % (mod, lc, hc, baseband_freq))
+        if self._type != 'W/F':
+            self._send_message('SET mod=%s low_cut=%d high_cut=%d freq=%.3f' % (mod, lc, hc, baseband_freq))
         self._lowcut = lc
         self._highcut = hc
         self._freq = freq
 
     def set_freq(self, freq):
         self._freq = freq
-        mod    = self._options.modulation
+        mod = self._options.modulation
         lp_cut = self._options.lp_cut
         hp_cut = self._options.hp_cut
         if mod == 'am' or mod == 'amn' or mod == 'amw':
@@ -449,17 +464,30 @@ class KiwiSDRStream(KiwiSDRStreamBase):
             raise KiwiTooBusyError('%s: all %s client slots taken' % (self._options.server_host, value))
         if name == 'redirect':
             raise KiwiRedirectError(urllib.unquote(value))
-        if name == 'badp' and value == '1':
-            raise KiwiBadPasswordError("%s: bad password OR all channels busy that don't require a password" % self._options.server_host)
-        if name == 'badp' and value == '5':
-            raise KiwiNoMultipleConnectionsError('%s: no multiple connections from the same IP address' % self._options.server_host)
+        if name == 'badp':
+            if value == '1':
+                raise KiwiBadPasswordError("%s: Bad password OR all channels busy that don't require a password." % self._options.server_host)
+            if value == '2':
+                raise KiwiBadPasswordError("%s: Still determining local interface address. Please try again in a few moments." % self._options.server_host)
+            if value == '3':
+                raise KiwiBadPasswordError("%s: Admin connection not allowed from this ip address." % self._options.server_host)
+            if value == '4':
+                raise KiwiBadPasswordError("%s: No admin password set. Can only connect from same local network as Kiwi." % self._options.server_host)
+            if value == '5':
+                raise KiwiConnectionError('%s: No multiple connections from the same IP address.' % self._options.server_host)
+            if value == '6':
+                raise KiwiConnectionError('%s: Database update in progress. Please try again after one minute.' % self._options.server_host)
+            if value == '7':
+                raise KiwiConnectionError('%s: Another admin connection already open. Only one at a time allowed.' % self._options.server_host)
         if name == 'down':
             raise KiwiDownError('%s: server is down atm' % self._options.server_host)
         if name == 'camp_disconnect':
             raise KiwiCampError("%s: camped connection closed or doesn't exist" % self._options.server_host)
 
         # Handle data items
-        if name == 'audio_rate':
+        if name == 'mkr':
+            self._process_mkr(value)
+        elif name == 'audio_rate':
             self._set_ar_ok(int(value), 44100)
         elif name == 'sample_rate':
             self._sample_rate = float(value)
@@ -513,12 +541,20 @@ class KiwiSDRStream(KiwiSDRStreamBase):
             self._process_aud(body)
             #except Exception as e:
             #    logging.error(e)
-            # Ensure we don't get kicked due to timeouts
-            self._set_keepalive()
+            
+            # Ensure we don't get kicked due to timeouts (only send at 1 Hz)
+            secs = int(time.time())
+            if secs != self._last_snd_keepalive:
+                self._set_keepalive()
+                self._last_snd_keepalive = secs
         elif tag == 'W/F':
             self._process_wf(body[1:]) ## skip 1st byte
-            # Ensure we don't get kicked due to timeouts
-            self._set_keepalive()
+            
+            # Ensure we don't get kicked due to timeouts (only send at 1 Hz)
+            secs = time.time()
+            if secs != self._last_wf_keepalive:
+                self._set_keepalive()
+                self._last_wf_keepalive = secs
         elif tag == 'EXT':
             body = bytearray2str(body[1:])
             for pair in body.split(' '):
@@ -733,6 +769,9 @@ class KiwiSDRStream(KiwiSDRStreamBase):
         pass
 
     def _setup_rx_params(self):
+        pass
+        """
+        REMOVE-ME
         if self._type == 'W/F':
             self._set_zoom_cf(0, 0)
             self._set_maxdb_mindb(-10, -110)
@@ -741,6 +780,7 @@ class KiwiSDRStream(KiwiSDRStreamBase):
         if self._type == 'SND':
             self._set_mod('am', 100, 2800, 4625.0)
             self._set_agc(True)
+        """
 
     def _setup_no_api(self):
         if self._options.user != 'none':
@@ -768,44 +808,60 @@ class KiwiSDRStream(KiwiSDRStreamBase):
             # "SET options=" must be sent before auth
             if self._options.nolocal:
                 self._send_message('SET options=1')
-            self._set_auth('kiwi', self._options.password, self._options.tlimit_password)
+            self._set_auth('admin' if self._options.admin else 'kiwi', self._options.password, self._options.tlimit_password)
 
     def close(self):
         if self._stream == None:
             return
         try:
+            q_stream_closed.put(None)   # signal writer stream is closed
+            time.sleep(0.1)
             ## STATUS_GOING_AWAY does not make the stream to wait for a reply for the WS close request
             ## this is used because close_connection expects the close response from the server immediately
+            logging.debug('close1..')
             self._stream.close_connection(mod_pywebsocket.common.STATUS_GOING_AWAY)
+            logging.debug('close1')
             self._socket.close()
+            logging.debug('..close1')
         except Exception as e:
             logging.error('websocket close: "%s"' % e)
 
     def run(self):
         """Run the client."""
         if self._reader:
+            # reader
             try:
                 received = self._stream.receive_message()
                 if received is None:
+                    q_stream_closed.put(None)   # signal writer stream is closed
+                    time.sleep(0.1)
+                    logging.debug('close2..')
                     self._socket.close()
+                    logging.debug('..close2')
                     raise KiwiServerTerminatedConnection('server closed the connection cleanly')
             except ConnectionTerminatedException:
                     logging.debug('ConnectionTerminatedException')
                     raise KiwiServerTerminatedConnection('server closed the connection unexpectedly')
 
             self._process_ws_message(received)
-        else:
-            msg = self._writer_message()
-            self._stream.send_message(msg)
 
-        tlimit = self._options.tlimit
-        time_limit = tlimit != None and self._start_time != None and time.time() - self._start_time > tlimit
-        if time_limit or self._stop:
-            if self._need_nl:
-                print("")
-                self._need_nl = False
-            if self._options.stats and self._tot_meas_count > 0 and self._start_time != None:
-                print("%.1f meas/sec" % (float(self._tot_meas_count) / (time.time() - self._start_time)))
-            raise KiwiTimeLimitError('time limit reached')
+            tlimit = self._options.tlimit
+            time_limit = tlimit != None and self._start_time != None and time.time() - self._start_time > tlimit
+            if time_limit or self._stop:
+                if self._need_nl:
+                    print("")
+                    self._need_nl = False
+                if self._options.stats and self._tot_meas_count > 0 and self._start_time != None:
+                    print("%.1f meas/sec" % (float(self._tot_meas_count) / (time.time() - self._start_time)))
+                raise KiwiTimeLimitError('time limit reached')
+        else:
+            # writer
+            msg = self._writer_message()
+            #logging.debug('writer msg=%s stream_open=%d' % (msg, q_stream_closed.empty()))
+            if q_stream_closed.empty() and msg != None:
+                self._stream.send_message(msg)
+
+    def exit(self):
+        raise KiwiTimeLimitError('')
 
 # EOF

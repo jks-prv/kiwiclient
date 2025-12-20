@@ -7,7 +7,7 @@
 ##      IQ-swap, endian-reversal, squelch, option to include GPS data ...
 ##
 
-VERSION = 'v1.7'
+VERSION = 'v1.8'
 
 import array, logging, os, struct, sys, time, copy, threading, os
 import gc
@@ -20,6 +20,13 @@ from kiwi import KiwiSDRStream, KiwiWorker
 import optparse as optparse
 from optparse import OptionParser
 from optparse import OptionGroup
+from queue import Queue,Empty
+import json
+
+try:
+    import urllib.parse as urllib
+except ImportError:
+    import urllib
 
 HAS_PyYAML = True
 try:
@@ -36,7 +43,11 @@ HAS_RESAMPLER = True
 try:
     ## if available use libsamplerate for resampling
     from samplerate import Resampler
-except ImportError:
+    ## NB: MemoryError, because on some systems get:
+    ## "MemoryError: Cannot allocate write+execute memory for ffi.callback().
+    ## You might be running on a system that prevents this.
+    ## For more information, see https://cffi.readthedocs.io/en/latest/using.html#callbacks"
+except (ImportError, MemoryError):
     ## otherwise linear interpolation is used
     HAS_RESAMPLER = False
 
@@ -65,6 +76,7 @@ def _init_common(self, options, type):
     self._freq_offset = options.freq_offset
     self._start_ts = None
     self._start_time = None
+    self._options.writer_init = False
 
     self._squelch = Squelch(options) if options.sq_thresh is not None or options.scan_yaml is not None else None
     self._scan_continuous = False
@@ -181,6 +193,11 @@ def _write_wav_header(self, fp, filesize, samplerate, num_channels, is_kiwi_wav)
     fp.write(struct.pack('<4sIHHIIHH', b'fmt ', 16, 1, nchans, samplerate, byte_rate, block_align, bits_per_sample))
     if not is_kiwi_wav:
         fp.write(struct.pack('<4sI', b'data', filesize - 12 - 8 - 16 - 8))
+
+def enqueue_input(inp, q):
+    for line in iter(inp.readline, b''):
+        q.put(line)
+    inp.close()
 
 class RingBuffer(object):
     def __init__(self, len):
@@ -476,6 +493,15 @@ class KiwiSoundRecorder(KiwiSDRStream):
 
 ## -------------------------------------------------------------------------------------------------
 
+# CAUTION: must match order in kiwi rx/mode.h
+DX_MODE = {
+    'am':0, 'amn':1, 'usb':2, 'lsb':3, 'cw':4, 'cwn':5, 'nbfm':6, 'iq':7, 'drm':8,
+    'usn':9, 'lsn':10, 'sam':11, 'sau':12, 'sal':13, 'sas':14, 'qam':15, 'nnfm':16, 'amw':17
+}
+
+DX_7DAYS   = 0x0000fe00
+DX_MODE_16 = 0x00040000
+
 class KiwiWaterfallRecorder(KiwiSDRStream):
     def __init__(self, options):
         super(KiwiWaterfallRecorder, self).__init__()
@@ -527,6 +553,7 @@ class KiwiWaterfallRecorder(KiwiSDRStream):
             self._cmap_b.append(clamp(int(round(b)), 0, 255))
 
     def _setup_rx_params(self):
+        self.set_freq(self._freq)
         baseband_freq = self._remove_freq_offset(self._freq)
         self._set_zoom_cf(self._options.zoom, baseband_freq)
         self._set_maxdb_mindb(-10, -110)    # needed, but values don't matter
@@ -538,6 +565,25 @@ class KiwiWaterfallRecorder(KiwiSDRStream):
         self._set_wf_interp(self._options.interp)
         self.set_name(self._options.user)
 
+        if self._options.dx_list != None:
+            min, max = self._options.dx_list
+            self._send_message('SET MARKER db=0 min=%f max=%f zoom=0 width=1024 eibi_types_mask=0x0 filter_tod=0 anti_clutter=0' % (float(min), float(max)))
+        if self._options.dx_add:
+            # 65202 0xfeb2 fe=7-days b=t11(fax) 2=usb
+            logging.debug('mode=%s' % self.get_mod())
+            mode = DX_MODE[self.get_mod()]
+            if mode >= 16:
+                mode = mode - 16
+                mode = mode | DX_MODE_16
+            flags = DX_7DAYS | ((self._options.dx_type & 0xf) << 4) | mode
+            self._send_message('SET DX_UPD g=-1 f=%.2f lo=0 hi=0 o=0 s=0 fl=%d b=0 e=2400 i=%sx n=%sx p=%sx'
+                % (self.get_frequency(), flags, urllib.quote(self._options.dx_ident), urllib.quote(self._options.dx_notes), urllib.quote(self._options.dx_params)))
+        if self._options.dx_del != None:
+            self._send_message('SET DX_UPD g=%d f=-1' % self._options.dx_del)
+        if self._options.dx and not self._options.dx_list:
+            time.sleep(1)
+            self.exit()
+        
         self._start_time = time.time()
         span = self.zoom_to_span(self._options.zoom)
         start = baseband_freq - span/2
@@ -551,6 +597,59 @@ class KiwiWaterfallRecorder(KiwiSDRStream):
             raise Exception(s)
         if self._options.wf_png is True:
             logging.info("--wf_png: mindb %d, maxdb %d, cal %d dB" % (self._options.mindb, self._options.maxdb, self._options.wf_cal))
+
+    def _process_mkr(self, value):
+        dx_filename = "dx.json"
+        logging.info("writing file %s..." % dx_filename)
+        try:
+            #print(value)
+            m = json.loads(value)
+        except Exception as e:
+            print(e)
+            print("json.loads FAILED for:")
+            print(value)
+            return
+        #print(json.dumps(m, indent=1))
+        entries = 0
+        with open(dx_filename, 'w') as fp:
+            for e in m:
+                if 'tc' in e:   # skip header entry
+                    continue
+                freq = e['f']
+                if (freq) < 0:
+                    print(e)
+                flags = e['fl']
+                mode = \
+                    [ "AM", "AMN", "USB", "LSB", "CW", "CWN", "NBFM", "IQ", "DRM", "USN", "LSN", "SAM", "SAU", "SAL", "SAS", "QAM", "NNFM" ] \
+                    [flags & 0xf | (0x10 if (flags & 0x40000) else 0)]
+                type = (flags & 0x1f0) >> 4
+                ident = urllib.unquote(e['i']) if 'i' in e else ''
+                name = urllib.unquote(e['n']) if 'n' in e else ''
+
+                lo = e['lo'] if 'lo' in e else 0
+                hi = e['hi'] if 'hi' in e else 0
+                lo_s = hi_s = ''
+                if lo != 0 or hi != 0:
+                    lo_s = ', "lo":%d' % lo
+                    hi_s = ', "hi":%d' % hi
+                offset = ', "o":%d' % e['o'] if 'o' in e and e['o'] != 0 else ''
+                dow = (flags & 0xfe00) >> 9
+                dow_s = ', "d0":%d' % dow if dow != 0 and dow != 0x7f else ''
+                b0 = e['b'] if 'b' in e else 0
+                e0 = e['e'] if 'e' in e else 0
+                b_s = e_s = ''
+                if b0 != 0 or (e0 != 0 and e0 != 2400):
+                    b_s = ', "b0":%d' % b0
+                    e_s = ', "e0":%d' % e0
+                ext = ', "p":"%s"' % urllib.unquote(e['p']) if 'p' in e and e['p'] != '' else ''
+
+                #print('[%.2f, "%s", "%s", "%s", {"T%d":1}%s%s%s%s%s%s%s],' % (freq, mode, ident, name, type, lo_s, hi_s, offset, dow_s, b_s, e_s, ext))
+                s = '[%.2f, "%s", "%s", "%s", {"T%d":1}%s%s%s%s%s%s%s]' % (freq, mode, ident, name, type, lo_s, hi_s, offset, dow_s, b_s, e_s, ext)
+                print('--dx-del=%d => %s' % (e['g'], s))
+                fp.write('%s,\n' % s)
+                entries += 1
+        logging.info("wrote %d entries" % entries)
+        self.exit()
 
     def _waterfall_color_index_max_min(self, db_value):
         db_value = clamp(db_value + self._options.wf_cal, self._options.mindb, self._options.maxdb)
@@ -628,27 +727,27 @@ class KiwiWaterfallRecorder(KiwiSDRStream):
                 p = self.prev_dBm
                 f = fs + i*kpp
                 diff = abs(dBm-p)
-                logging.debug(f'{f:.0f}: {dBm:.0f} {p:.0f} {diff:.0f}')
+                #logging.debug(f'{f:.0f}: {dBm:.0f} {p:.0f} {diff:.0f}')
                 if dBm >= th and p >= th:
                     if diff <= rg:
                         if run == 0:
-                            self._last_start = f;
-                            self._last_idx = i;
+                            self._last_start = f
+                            self._last_idx = i
                         run = run+1
-                        logging.debug(f'  {run}')
+                        #logging.debug(f'  {run}')
                     else:
                         if run > runlen:
                             have_run = run
-                        run = 0;
-                        logging.debug(f'  RESET delta')
+                        run = 0
+                        #logging.debug(f'  RESET delta')
                 else:
-                    if run:
-                        logging.debug(f'  RESET level')
+                    #if run:
+                        #logging.debug(f'  RESET level')
                     if run > runlen:
                         have_run = run
                     run = 0
                 if have_run:
-                    logging.info(f'--snr: run={have_run} {self._last_start:.0f}-{f:.0f}({have_run*kpp:.0f}) ==================================================')
+                    #logging.info(f'--snr: run={have_run} {self._last_start:.0f}-{f:.0f}({have_run*kpp:.0f}) ==================================================')
                     for j in range(self._last_idx, i+1):
                         self._p_unsorted_avg[j] = -190      # notch the run
                     have_run = 0
@@ -788,8 +887,6 @@ class KiwiNetcat(KiwiSDRStream):
 
     def _setup_rx_params(self):
         user = self._options.user
-        if user == "kiwirecorder.py":
-            user = "kiwi_nc.py"
 
         if self._camp_chan != -1 and self._kiwi_version is not None and self._kiwi_version < 1.813:
             raise Exception('Option --camp requires camped Kiwi be running v1.813 or later')
@@ -890,10 +987,41 @@ class KiwiNetcat(KiwiSDRStream):
         self._fp_stdout.flush()
 
     def _writer_message(self):
+        if not self._options.fdx:
+            time.sleep(1)
+            return None
+        
+        test = 0
+        #test = 1
+        
         if self._options.writer_init == False:
             self._options.writer_init = True
-            return 'init_msg'
-        msg = sys.stdin.readline()  # blocks
+            self._fdx_seq = 0
+            self._q_readline = Queue()
+            t = threading.Thread(target=enqueue_input, args=(sys.stdin, self._q_readline))
+            t.daemon = True     # thread dies with the program
+            t.start()
+            return 'SET msg_log=camp_fdx_setup' if test else None
+        
+        if test:
+            self._fdx_seq = self._fdx_seq + 1
+            msg = 'SET msg_log=camp_fdx_test_%d' % self._fdx_seq
+            time.sleep(0.2)
+        else:
+            # stackoverflow.com/questions/375427/a-non-blocking-read-on-a-subprocess-pipe-in-python
+            try:
+                #line = self._q_readline.get_nowait()
+                line = self._q_readline.get(timeout=0.1)
+                time.sleep(0.1)     # throttle, because the above return immediately if no data
+            except Empty:
+                msg = None
+                time.sleep(0.1)
+            else:
+                if line == None or line == '':
+                    msg = None
+                else:
+                    msg = line
+                    #logging.debug('====> %s' % msg)
         return msg
 
 ## -------------------------------------------------------------------------------------------------
@@ -984,6 +1112,10 @@ def main():
                       action='callback',
                       callback_args=(str,),
                       callback=get_comma_separated_args)
+    parser.add_option('--admin',
+                      dest='admin',
+                      action='store_true', default=False,
+                      help='Kiwi login as admin')
     parser.add_option('--tlimit-pw', '--tlimit-password',
                       dest='tlimit_password',
                       type='string', default='',
@@ -1247,6 +1379,37 @@ def main():
                       help='Compute SNR value after specified number of waterfall averages')
     parser.add_option_group(group)
 
+    group = OptionGroup(parser, "DX label control options", "")
+    group.add_option('--dx', '--dx-list',
+                      dest='dx_list',
+                      type='float', nargs=2, default=None,
+                      help='List DX labels. DX_LIST is MIN MAX freqs in kHz. For example "--dx=2500 5000". Results displayed and written to file named "dx.json"')
+    group.add_option('--dx-add',
+                      dest='dx_add',
+                      action='store_true', default=False,
+                      help='Add a new DX label. See Makefile for example')
+    group.add_option('--dx-del',
+                      dest='dx_del',
+                      type='int', default=None,
+                      help='Delete a DX label specified by DX_DEL number, which is shown in the output from --dx-list. CAUTION: This number changes as DX list content changes. Always inspect latest --dx-list before deleting an entry.')
+    group.add_option('--dx-type',
+                      dest='dx_type',
+                      type='int', default=0,
+                      help='DX label type (0-15) to use with --dx-add')
+    group.add_option('--dx-ident',
+                      dest='dx_ident',
+                      type='string', default='ident',
+                      help='DX label ident string to use with --dx-add')
+    group.add_option('--dx-notes',
+                      dest='dx_notes',
+                      type='string', default='',
+                      help='DX label notes string to use with --dx-add')
+    group.add_option('--dx-params',
+                      dest='dx_params',
+                      type='string', default='',
+                      help='DX label parameter string to use with --dx-add')
+    parser.add_option_group(group)
+
     group = OptionGroup(parser, "Extension connection options", "")
     group.add_option('--ext',
                       dest='extension',
@@ -1345,6 +1508,14 @@ def main():
             options.interp = 10
             print('--wf-peaks note: no --wf-interp specified, so using MAX+CIC (=10)')
 
+    if options.dx_list is not None or options.dx_add or options.dx_del != None:
+        options.waterfall = True
+        options.zoom = 14
+        options.dx = True
+    
+    if (options.dx_add or options.dx_del) and not options.admin:
+        raise Exception('--dx-add and --dx-del require --admin option, and possibly admin password via --pw, to be given.')
+
     if options.netcat:
         if options.sq_thresh is not None:
             raise Exception('squelch not currently supported by --netcat. Email Kiwi support if you really need it.')
@@ -1410,32 +1581,31 @@ def main():
         for i,opt in enumerate(options):
             opt.multiple_connections = multiple_connections
             opt.idx = i
-            snd_recorders.append(KiwiWorker(args=(KiwiSoundRecorder(opt),opt,False,run_event)))
+            snd_recorders.append(KiwiWorker(args=(KiwiSoundRecorder(opt),opt,True,False,run_event)))
 
     wf_recorders = []
     if not gopt.netcat and gopt.waterfall:
         for i,opt in enumerate(options):
             opt.multiple_connections = multiple_connections
             opt.idx = i
-            wf_recorders.append(KiwiWorker(args=(KiwiWaterfallRecorder(opt),opt,False,run_event)))
+            wf_recorders.append(KiwiWorker(args=(KiwiWaterfallRecorder(opt),opt,True,False,run_event)))
 
     ext_recorders = []
     if not gopt.netcat and (gopt.extension is not None):
         for i,opt in enumerate(options):
             opt.multiple_connections = multiple_connections
             opt.idx = i
-            ext_recorders.append(KiwiWorker(args=(KiwiExtensionRecorder(opt),opt,True,run_event)))
+            ext_recorders.append(KiwiWorker(args=(KiwiExtensionRecorder(opt),opt,True,True,run_event)))
 
     nc_recorders = []
     if gopt.netcat:
         for i,opt in enumerate(options):
             opt.multiple_connections = multiple_connections
             opt.idx = 0
-            nc_recorders.append(KiwiWorker(args=(KiwiNetcat(opt, True),opt,False,run_event)))
+            nc_recorders.append(KiwiWorker(args=(KiwiNetcat(opt, True),opt,True,False,run_event)))
             if gopt.fdx:
-                opt.writer_init = False
                 opt.idx = 1
-                nc_recorders.append(KiwiWorker(args=(KiwiNetcat(opt, False),opt,False,run_event)))
+                nc_recorders.append(KiwiWorker(args=(KiwiNetcat(opt, False),opt,False,False,run_event)))
     try:
         for i,r in enumerate(snd_recorders):
             if gopt.launch_delay != 0 and i != 0 and options[i-1].server_host == options[i].server_host:

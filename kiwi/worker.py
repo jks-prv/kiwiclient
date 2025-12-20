@@ -8,11 +8,14 @@ from traceback import print_exc
 from .client import KiwiTooBusyError, KiwiRedirectError, KiwiTimeLimitError, KiwiServerTerminatedConnection
 from .rigctld import Rigctld
 
+from queue import Queue
+q_stream = Queue()
+
 class KiwiWorker(threading.Thread):
     def __init__(self, group=None, target=None, name=None, args=(), kwargs=None):
         super(KiwiWorker, self).__init__(group=group, target=target, name=name)
-        self._recorder, self._options, self._delay_run, self._run_event = args
-        self._recorder._reader = True
+        self._recorder, self._options, self._reader, self._delay_run, self._run_event = args
+        self._recorder._reader = self._reader
         self._event = threading.Event()
         self._rigctld = None
         if self._options.rigctl_enabled:
@@ -27,9 +30,19 @@ class KiwiWorker(threading.Thread):
         if self._delay_run:     # let snd/wf get established first
             time.sleep(3)
         
+        if not self._reader:
+            # writer thread
+            self._recorder._stream = q_stream.get()     # stream passed from reader thread
+            while self._do_run():
+                self._recorder.run()
+            logging.debug('writer STOP')
+            return
+
+        # reader thread
         while self._do_run():
             try:
                 self._recorder.connect(self._options.server_host, self._options.server_port)
+                q_stream.put(self._recorder._stream)    # pass stream to writer thread
 
             except Exception as e:
                 logging.warn("Failed to connect, sleeping and reconnecting error='%s'" %e)
@@ -50,6 +63,7 @@ class KiwiWorker(threading.Thread):
                     # do things like freq changes while not receiving sound
                     if self._rigctld:
                         self._rigctld.run()
+                logging.debug('reader STOP')
 
             except KiwiServerTerminatedConnection as e:
                 if self._options.no_api:
@@ -101,6 +115,7 @@ class KiwiWorker(threading.Thread):
                 break
 
         self._run_event.clear()   # tell all other threads to stop
+        logging.debug('send STOP')
         self._recorder.close()
         self._recorder._close_func()
         if self._rigctld:

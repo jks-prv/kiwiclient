@@ -230,8 +230,8 @@ def main():
     run_event.set()
 
     snd_queue,wf_queue = [Queue(),Queue()]
-    snd_recorder = KiwiWorker(args=(KiwiSoundRecorder    (opt, snd_queue), opt, False, run_event))
-    wf_recorder  = KiwiWorker(args=(KiwiWaterfallRecorder(opt, wf_queue),  opt, False, run_event))
+    snd_recorder = KiwiWorker(args=(KiwiSoundRecorder    (opt, snd_queue), opt, True, False, run_event))
+    wf_recorder  = KiwiWorker(args=(KiwiWaterfallRecorder(opt, wf_queue),  opt, True, False, run_event))
     consumer     = Consumer(args=(opt,snd_queue,wf_queue,run_event))
 
     threads = [snd_recorder, wf_recorder, consumer]

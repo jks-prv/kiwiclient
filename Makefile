@@ -510,6 +510,19 @@ wf-bug:
 	$(KREC) $(HP) -f 15000 -m usb --tlimit=120 --snd --wf --z 0 --speed 0 --wf-comp  --wf-auto --stats --log-level=debug
 
 
+# DX labels
+
+dx-list dx:
+	$(KREC) $(HP) --dx-list=9 12 --log_level=info
+	cat dx.json
+
+dx-add:
+	$(KREC) $(HP) --admin --pw=apai64 -f 10 --mode=cw --dx-ident='foo bar' --dx-type=3 --dx-add --log_level=info
+
+dx-del:
+	$(KREC) $(HP) --admin --pw=apai64 --dx-del=0 --log_level=info
+
+
 SNR = $(HP)
 
 snr:
@@ -551,7 +564,7 @@ nciqre:
 	$(KREC) --nc $(H_NC) $(F_NC) -m iq --tlimit=10 --log=debug --nc-wav --progress -r 6000 >nciqre.wav
 
 ncwf:
-	$(KREC) --wf $(HP) $(F_NC) -z 0 --log_level info -u krec-WF --tlimit=5 --nq --progress --nc >ncwf.nc
+	$(KREC) --wf $(H_NC) $(F_NC) -z 0 --log_level info -u krec-WF --tlimit=5 --nq --progress --nc >ncwf.nc
 
 
 # camping
@@ -559,6 +572,9 @@ CAMP = --station=$(HOST) --nc --nc-wav --log=debug --camp=0
 
 camp:
 	$(KREC) $(HP) $(CAMP) --tlimit=10 --progress >camp.wav
+fdx:
+	echo "SET msg_log=readline" | \
+	$(KREC) $(HP) $(CAMP) --fdx --tlimit=10 --log=debug --progress >camp.wav
 campre:
 	$(KREC) $(HP) $(CAMP) --tlimit=10 --progress -r 6000 >campre.wav
 camp20:
@@ -576,12 +592,12 @@ HFDL_HOST = $(HP)
 HFDL_FREQ = 5720
 
 dumphfdl:
-	$(KREC) --nc $(HFDL_HOST) -m iq -f $(HFDL_FREQ) --user kiwi_nc:dumphfdl | \
+	$(KREC) --nc $(HFDL_HOST) -m iq -f $(HFDL_FREQ) --user krec:dumphfdl | \
 	dumphfdl --iq-file - --sample-rate 12000 --sample-format CS16 --read-buffer-size 9600 \
 	--centerfreq $(HFDL_FREQ) $(HFDL_FREQ)
 
 dumphfdl_agc_yaml:
-	$(KREC) --nc $(HFDL_HOST) -m iq -f $(HFDL_FREQ) --user kiwi_nc:dumphfdl --agc-yaml fast_agc.yaml | \
+	$(KREC) --nc $(HFDL_HOST) -m iq -f $(HFDL_FREQ) --user krec:dumphfdl --agc-yaml fast_agc.yaml | \
 	dumphfdl --iq-file - --sample-rate 12000 --sample-format CS16 --read-buffer-size 9600 \
 	--centerfreq $(HFDL_FREQ) $(HFDL_FREQ)
 
@@ -630,7 +646,7 @@ help h:
 	$(KREC) --help
 
 clean:
-	-rm -f *.log *.wav *.png *.txt *.npy *.nc
+	-rm -f *.log *.wav *.png *.txt *.npy *.nc dx.json
 
 clean_dist: clean
 	-rm -f *.pyc */*.pyc oct/*.oct

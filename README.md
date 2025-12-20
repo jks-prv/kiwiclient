@@ -1,11 +1,12 @@
-[updated 20 August 2025]
+[updated 20 December 2025]
 
 # KiwiClient
 
-This is the version v1.7 Python client for KiwiSDR. It allows you to:
+This is the version v1.8 Python client for KiwiSDR. It allows you to:
 
 * Receive data streams with audio samples, IQ samples, S-meter and waterfall data
 * Issue commands to the KiwiSDR
+* Edit Kiwi DX labels in the stored database (list, add, delete)
 
 ## Install
 
@@ -30,6 +31,8 @@ On many Linux distributions the command would be similar to `'apt install python
 On macOS try `'pip3 install numpy'` or perhaps `'python3 -m pip install numpy'`
 
 ## Resampling
+
+The following is optional. If you do nothing then the default low-quality resampling is used.
 
 If you want high-quality resampling based on libsamplerate (SRC) you should build the version
 included with KiwiClient that has fixes rather than using the standard python-samplerate package.  
@@ -88,6 +91,7 @@ The data is, at the moment, transferred in uncompressed format.
 which includes GNSS timestamps (see below).
 * The `--netcat` option can stream raw or .wav-formatted samples to standard output.
 * Kiwirecorder can "camp" onto an existing KiwiSDR audio channel. See the `--camp-chan` option.
+* To edit Kiwi DX labels see the example "dx" targets in the Makefile.
 * AGC options can be specified in a YAML-formatted file, `--agc-yaml` option, see `default_agc.yaml`.
 * Scanning options (with optional squelch) can be specified in a YAML-formatted file, `--scan-yaml` option.  
 See the file `SCANNING` for detailed info.
