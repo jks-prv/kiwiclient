@@ -494,7 +494,7 @@ class Stream(StreamBase):
         """Send message.
 
         Args:
-            message: text in unicode or binary in str to send.
+            message: text in str or binary in bytes to send.
             binary: send message as binary frame.
 
         Raises:
@@ -507,9 +507,9 @@ class Stream(StreamBase):
             raise BadOperationException(
                 'Requested send_message after sending out a closing handshake')
 
-        if binary and isinstance(message, unicode):
+        if binary and isinstance(message, str):
             raise BadOperationException(
-                'Message for binary frame must be instance of str')
+                'Message for binary frame must be instance of bytes')
 
         for message_filter in self._options.outgoing_message_filters:
             message = message_filter.filter(message, end, binary)
@@ -726,12 +726,12 @@ class Stream(StreamBase):
 
     def receive_message(self):
         """Receive a WebSocket frame and return its payload as a text in
-        unicode or a binary in str.
+        str or a binary in bytes.
 
         Returns:
             payload data of the frame
-            - as unicode instance if received text frame
-            - as str instance if received binary frame
+            - as str instance if received text frame
+            - as bytes instance if received binary frame
             or None iff received closing handshake.
         Raises:
             BadOperationException: when called on a client-terminated
@@ -823,7 +823,7 @@ class Stream(StreamBase):
             wait_response: True when caller want to wait the response.
         Raises:
             BadOperationException: when reason is specified with code None
-            or reason is not an instance of both str and unicode.
+            or reason is not an instance of both str and bytes.
         """
 
         if self._request.server_terminated:
@@ -843,9 +843,9 @@ class Stream(StreamBase):
                     'close reason must not be specified if code is None')
             reason = ''
         else:
-            if not isinstance(reason, str) and not isinstance(reason, unicode):
+            if not isinstance(reason, str) and not isinstance(reason, bytes):
                 raise BadOperationException(
-                    'close reason must be an instance of str or unicode')
+                    'close reason must be an instance of str or bytes')
 
         self._send_closing_handshake(code, reason)
         self._logger.debug(
