@@ -674,12 +674,18 @@ class KiwiSDRStream(KiwiSDRStreamBase):
                     comp = "no-comp"
                     count = len(data) // 2
 
-                samples = np.ndarray(count, dtype=dtype, buffer=data).astype(np.float32)
-                cs      = np.ndarray(count, dtype=np.complex64)
-                cs.real = samples[0:count:1]
-                cs.imag = cs.real       # replicate mono audio in both channels
-                fmt = ("(CAMP mono %s)" % comp) if self._options.netcat is True else None
-                self._process_iq_samples(seq, cs, rssi, None, fmt)
+                if self._options.camp_allow_1ch:
+                    fmt = ("(CAMP mono %s, allow 1-ch)" % comp) if self._options.netcat is True else None
+                    # above: count = len(data) // 2
+                    samples = np.ndarray(count, dtype=dtype, buffer=data).astype(np.int16)
+                    self._process_audio_samples(seq, samples, rssi, fmt)
+                else:
+                    samples = np.ndarray(count, dtype=dtype, buffer=data).astype(np.float32)
+                    cs      = np.ndarray(count, dtype=np.complex64)
+                    cs.real = samples[0:count:1]
+                    cs.imag = cs.real       # replicate mono audio in both channels
+                    fmt = ("(CAMP mono %s, always 2-ch)" % comp) if self._options.netcat is True else None
+                    self._process_iq_samples(seq, cs, rssi, None, fmt)
         else:
             if self._stereo:     # stereo mode is never compressed
                 gps = dict(zip(['last_gps_solution', 'dummy', 'gpssec', 'gpsnsec'], struct.unpack('<BBII', buffer(data[0:10]))))
@@ -859,7 +865,7 @@ class KiwiSDRStream(KiwiSDRStreamBase):
             msg = self._writer_message()
             #logging.debug('writer msg=%s stream_open=%d' % (msg, q_stream_closed.empty()))
             if q_stream_closed.empty() and msg != None:
-                self._stream.send_message(msg)
+                self._stream.send_message(msg, binary = True if self._options.fdx_snd else False)
 
     def exit(self):
         raise KiwiTimeLimitError('')

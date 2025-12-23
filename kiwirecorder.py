@@ -183,8 +183,9 @@ def _setup_resampler(self):
             logging.warning('resampling from %g to %g Hz (ratio=%f)' % (self._sample_rate, self._output_sample_rate, self._ratio))
 
 def _write_wav_header(self, fp, filesize, samplerate, num_channels, is_kiwi_wav):
-    # always 2-channels if camping because can't predict what camped channel will do (mono vs stereo)
-    nchans = 2 if self._camping else num_channels
+    # always 2-channels if camping, and not allowing 1-ch mode,
+    # because can't predict what camped channel will do (mono vs stereo)
+    nchans = 2 if self._camping and not self._options.camp_allow_1ch else num_channels
     samplerate = int(samplerate+0.5)
     fp.write(struct.pack('<4sI4s', b'RIFF', filesize - 8, b'WAVE'))
     bits_per_sample = 16
@@ -194,9 +195,16 @@ def _write_wav_header(self, fp, filesize, samplerate, num_channels, is_kiwi_wav)
     if not is_kiwi_wav:
         fp.write(struct.pack('<4sI', b'data', filesize - 12 - 8 - 16 - 8))
 
-def enqueue_input(inp, q):
-    for line in iter(inp.readline, b''):
-        q.put(line)
+def enqueue_input(self, inp, q):
+    if self._options.fdx_snd:
+        while True:
+            chunk = sys.stdin.buffer.read(1024)     # read binary data
+            if not chunk:
+                break
+            q.put(b"SET MON_SND=" + chunk)
+    else:
+        for line in iter(inp.readline, b''):
+            q.put(line)
     inp.close()
 
 class RingBuffer(object):
@@ -997,31 +1005,33 @@ class KiwiNetcat(KiwiSDRStream):
         if self._options.writer_init == False:
             self._options.writer_init = True
             self._fdx_seq = 0
-            self._q_readline = Queue()
-            t = threading.Thread(target=enqueue_input, args=(sys.stdin, self._q_readline))
+            self._q_rbuf = Queue()
+            t = threading.Thread(target=enqueue_input, args=(self, sys.stdin, self._q_rbuf))
             t.daemon = True     # thread dies with the program
             t.start()
-            return 'SET msg_log=camp_fdx_setup' if test else None
+            return "SET msg_log=fdx_setup" if test and not self._options.fdx_snd else None
         
         if test:
+            if self._options.fdx_snd:
+                msg = b"SET MON_SND=\x00\x01\x02\x03 %d" % self._fdx_seq
+            else:
+                msg = 'SET msg_log=camp_fdx_test_%d' % self._fdx_seq
             self._fdx_seq = self._fdx_seq + 1
-            msg = 'SET msg_log=camp_fdx_test_%d' % self._fdx_seq
             time.sleep(0.2)
         else:
             # stackoverflow.com/questions/375427/a-non-blocking-read-on-a-subprocess-pipe-in-python
             try:
-                #line = self._q_readline.get_nowait()
-                line = self._q_readline.get(timeout=0.1)
-                time.sleep(0.1)     # throttle, because the above return immediately if no data
+                #line = self._q_rbuf.get_nowait()
+                line = self._q_rbuf.get(timeout=0.01)
+                time.sleep(0.01)     # throttle, because the above return immediately if no data
             except Empty:
                 msg = None
-                time.sleep(0.1)
+                time.sleep(0.01)
             else:
                 if line == None or line == '':
                     msg = None
                 else:
                     msg = line
-                    #logging.debug('====> %s' % msg)
         return msg
 
 ## -------------------------------------------------------------------------------------------------
@@ -1311,6 +1321,10 @@ def main():
                       dest='camp_chan',
                       type='int', default=-1,
                       help='Camp on an existing audio channel instead of opening a new connection. Argument is Kiwi channel number. Note that camping does not currently support resampling, squelch or GPS timestamps.')
+    group.add_option('--camp-allow-1ch',
+                      dest='camp_allow_1ch',
+                      action='store_true', default=False,
+                      help='Allow camped output to be 1-channel. Normally camped output is always made 2-channel to accomodate mono/stereo switching by camped channel')
     group.add_option('--wb', '--wideband',
                       dest='wideband',
                       action='store_true', default=False,
@@ -1434,6 +1448,10 @@ def main():
                       dest='fdx',
                       action='store_true', default=False,
                       help='Connection is full duplex (two-way)')
+    group.add_option('--fdx-snd',
+                      dest='fdx_snd',
+                      action='store_true', default=False,
+                      help='Netcat connection to Kiwi is sending sound data')
     group.add_option('--progress',
                       dest='progress',
                       action='store_true', default=False,

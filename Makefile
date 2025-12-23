@@ -573,7 +573,7 @@ CAMP = --station=$(HOST) --nc --nc-wav --log=debug --camp=0
 camp:
 	$(KREC) $(HP) $(CAMP) --tlimit=10 --progress >camp.wav
 fdx:
-	echo "SET msg_log=readline" | \
+	echo "SET msg_log=fdx_data" | \
 	$(KREC) $(HP) $(CAMP) --fdx --tlimit=10 --log=debug --progress >camp.wav
 campre:
 	$(KREC) $(HP) $(CAMP) --tlimit=10 --progress -r 6000 >campre.wav
