@@ -1530,6 +1530,8 @@ def main():
         options.waterfall = True
         options.zoom = 14
         options.dx = True
+    else:
+        options.dx = False
     
     if (options.dx_add or options.dx_del) and not options.admin:
         raise Exception('--dx-add and --dx-del require --admin option, and possibly admin password via --pw, to be given.')
