@@ -572,15 +572,22 @@ CAMP = --station=$(HOST) --nc --nc-wav --log=debug --camp=0
 
 camp:
 	$(KREC) $(HP) $(CAMP) --tlimit=10 --progress >camp.wav
-fdx:
-	echo "SET msg_log=fdx_data" | \
-	$(KREC) $(HP) $(CAMP) --fdx --tlimit=10 --log=debug --progress >camp.wav
 campre:
 	$(KREC) $(HP) $(CAMP) --tlimit=10 --progress -r 6000 >campre.wav
 camp20:
 	$(KREC) $(HP) $(CAMP) --tlimit=20 --progress >camp.wav
 camp60:
 	$(KREC) $(HP) $(CAMP) --tlimit=60 --progress >camp.wav
+
+
+# send text data in reverse direction to Kiwi while recording from Kiwi in netcat mode
+rev:
+	echo "text data to be logged" | \
+	$(KREC) $(HP) --nc --rev-text --tlimit=10 --log=debug --progress >camp.wav
+
+rev-camp:
+	echo '{ "JSON":1, "error":"error text" }' | \
+	$(KREC) $(HP) $(CAMP) --rev-text --tlimit=10 --log=debug --progress >camp.wav
 
 
 # streaming to dumphfdl

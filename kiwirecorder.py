@@ -7,7 +7,7 @@
 ##      IQ-swap, endian-reversal, squelch, option to include GPS data ...
 ##
 
-VERSION = 'v1.8'
+VERSION = 'v1.9'
 
 import array, logging, os, struct, sys, time, copy, threading, os
 import gc
@@ -195,17 +195,22 @@ def _write_wav_header(self, fp, filesize, samplerate, num_channels, is_kiwi_wav)
     if not is_kiwi_wav:
         fp.write(struct.pack('<4sI', b'data', filesize - 12 - 8 - 16 - 8))
 
-def enqueue_input(self, inp, q):
-    if self._options.fdx_snd:
+def enqueue_input(self, binary, inp, q, q_input_closed):
+    if binary:
         while True:
-            chunk = sys.stdin.buffer.read(1024)     # read binary data
+            chunk = inp.buffer.read(1024)   # read binary data
+            #logging.debug('enqueue_input chunk=%s' % type(chunk))
             if not chunk:
                 break
-            q.put(b"SET MON_SND=" + chunk)
+            q.put(b"SET rev_bin=" + chunk)
     else:
-        for line in iter(inp.readline, b''):
-            q.put(line)
+        for line in iter(inp.readline, ''):
+            #logging.debug('enqueue_input line=%s' % line)
+            cmd = "rev_txt" if self._camp_chan != -1 else "msg_log"
+            q.put("SET %s=%s" % (cmd, line))
     inp.close()
+    q_input_closed.put(True)   # signal writer stream is closed
+    #logging.debug('enqueue_input CLOSE')
 
 class RingBuffer(object):
     def __init__(self, len):
@@ -994,36 +999,55 @@ class KiwiNetcat(KiwiSDRStream):
         self._fp_stdout.write(samples)
         self._fp_stdout.flush()
 
-    def _writer_message(self):
-        if not self._options.fdx:
+    def _writer_message(self):      # returns: msg, oob, closed
+        if not self._options.rev:
             time.sleep(1)
-            return None
+            return None, None, False
+        
+        # if camping wait until camping setup before writing data
+        if self._camp_chan != -1 and self._camp_wait_event.is_set():
+            time.sleep(0.5)
+            #logging.debug("not READY camp_chan=%d" % self._camp_chan)
+            return None, None, False
         
         test = 0
         #test = 1
         
         if self._options.writer_init == False:
             self._options.writer_init = True
-            self._fdx_seq = 0
-            self._q_rbuf = Queue()
-            t = threading.Thread(target=enqueue_input, args=(self, sys.stdin, self._q_rbuf))
-            t.daemon = True     # thread dies with the program
-            t.start()
-            return "SET msg_log=fdx_setup" if test and not self._options.fdx_snd else None
+            #logging.debug('writer PID=%d' % threading.get_native_id())
+            self._rev_seq = 0
+            self._q_input_closed = Queue()
+            
+            if test:
+                return "SET msg_log=rev_setup", None, False
+            else:
+                self._q_rbuf = Queue()
+                t = threading.Thread(target=enqueue_input, args=(self, self._options.rev_bin, sys.stdin, self._q_rbuf, self._q_input_closed))
+                t.daemon = True     # thread dies with the program
+                t.start()
+                
+                if self._options.rev_oob:
+                    self._q_obuf = Queue()
+                    fd = os.fdopen(self._options.rev_oob,'r')
+                    t = threading.Thread(target=enqueue_input, args=(self, False, fd, self._q_obuf, self._q_input_closed))
+                    t.daemon = True     # thread dies with the program
+                    t.start()
+                return None, None, False
         
         if test:
-            if self._options.fdx_snd:
-                msg = b"SET MON_SND=\x00\x01\x02\x03 %d" % self._fdx_seq
+            if self._options.rev_bin:
+                msg = b"SET BINARY=\x00\x01\x02\x03 %d" % self._rev_seq
             else:
-                msg = 'SET msg_log=camp_fdx_test_%d' % self._fdx_seq
-            self._fdx_seq = self._fdx_seq + 1
+                msg = 'SET msg_log=camp_rev_test_%d' % self._rev_seq
+            oob = None
             time.sleep(0.2)
         else:
             # stackoverflow.com/questions/375427/a-non-blocking-read-on-a-subprocess-pipe-in-python
             try:
                 #line = self._q_rbuf.get_nowait()
                 line = self._q_rbuf.get(timeout=0.01)
-                time.sleep(0.01)     # throttle, because the above return immediately if no data
+                time.sleep(0.01)    # throttle, because the above return immediately if no data
             except Empty:
                 msg = None
                 time.sleep(0.01)
@@ -1032,7 +1056,24 @@ class KiwiNetcat(KiwiSDRStream):
                     msg = None
                 else:
                     msg = line
-        return msg
+                    #logging.debug('_writer_message msg=%s' % msg)
+            
+            oob = None
+            if self._options.rev_oob:
+                try:
+                    line = self._q_obuf.get(timeout=0.01)
+                    time.sleep(0.01)    # throttle, because the above return immediately if no data
+                except Empty:
+                    time.sleep(0.01)
+                else:
+                    if line != None and line != '':
+                        oob = line
+        
+        self._rev_seq = self._rev_seq + 1
+        closed = msg is None and not self._q_input_closed.empty()
+        if closed:
+            logging.debug('writer CLOSE')
+        return msg, oob, closed
 
 ## -------------------------------------------------------------------------------------------------
 
@@ -1320,7 +1361,7 @@ def main():
     group.add_option('--camp', '--camp-chan',
                       dest='camp_chan',
                       type='int', default=-1,
-                      help='Camp on an existing audio channel instead of opening a new connection. Argument is Kiwi channel number. Note that camping does not currently support resampling, squelch or GPS timestamps.')
+                      help='Camp on an existing audio channel instead of opening a new connection. Argument is Kiwi channel number. Note that camping does not currently support squelch or GPS timestamps.')
     group.add_option('--camp-allow-1ch',
                       dest='camp_allow_1ch',
                       action='store_true', default=False,
@@ -1439,23 +1480,27 @@ def main():
     group.add_option('--nc', '--netcat',
                       dest='netcat',
                       action='store_true', default=False,
-                      help='Open a netcat connection. Note that netcat does not currently support resampling, squelch or GPS timestamps.')
+                      help='Open a netcat connection. Note that netcat does not currently support squelch or GPS timestamps.')
     group.add_option('--nc-wav', '--nc_wav',
                       dest='nc_wav',
                       action='store_true', default=False,
-                      help='Format output as an continuous wav file stream. Note that --nc-wav does not currently support resampling, squelch or GPS timestamps.')
-    group.add_option('--fdx',
-                      dest='fdx',
+                      help='Format output as an continuous wav file stream. Note that --nc-wav does not currently support squelch or GPS timestamps.')
+    group.add_option('--rev-txt', '--rev-text',
+                      dest='rev_txt',
                       action='store_true', default=False,
-                      help='Connection is full duplex (two-way)')
-    group.add_option('--fdx-snd',
-                      dest='fdx_snd',
+                      help='Establish reverse connection to Kiwi sending text data. Can be used with camp mode.')
+    group.add_option('--rev-bin',
+                      dest='rev_bin',
                       action='store_true', default=False,
-                      help='Netcat connection to Kiwi is sending sound data')
+                      help='Establish reverse connection to Kiwi sending binary data. Designed for streaming audio back to Kiwi while in camp mode.')
+    group.add_option('--rev-oob',
+                      dest='rev_oob',
+                      type='int', default=0,
+                      help='Reverse connection to Kiwi sends interleaved out-of-band text data read from file descriptor number FDX_OOB (>= 3)')
     group.add_option('--progress',
                       dest='progress',
                       action='store_true', default=False,
-                      help='Print progress messages (doesn\'t effect streamed data)')
+                      help='Print progress messages on stderr (doesn\'t affect streamed data)')
     parser.add_option_group(group)
 
     group = OptionGroup(parser, "KiwiSDR development options", "")
@@ -1500,6 +1545,10 @@ def main():
 
     run_event = threading.Event()
     run_event.set()
+    
+    # have to use an event and not a Queue because set/get in different worker contexts (snd_recorder vs nc_recorder)
+    camp_wait_event = threading.Event()
+    camp_wait_event.set()
 
     if options.freq_pbc:
         logging.info('command line: --pbc')
@@ -1541,6 +1590,16 @@ def main():
             raise Exception('squelch not currently supported by --netcat. Email Kiwi support if you really need it.')
         if options.is_kiwi_wav is True:
             raise Exception('GPS timestamps not currently supported by --netcat. Email Kiwi support if you really need it.')
+    
+    options.rev = options.rev_txt or options.rev_bin or options.rev_oob
+    if (options.rev) and not options.netcat:
+        raise Exception('the --rev modes require --netcat')
+
+    if options.rev_txt and options.rev_bin:
+        raise Exception("can't specify both --rev-txt and --rev-bin")
+
+    if options.rev_oob and options.rev_oob <= 2:
+        raise Exception('--rev-oob file descriptor number must be >= 3 (i.e. not stdin=0, stdout=1, stderr=2)')
 
     ### decode AGC YAML file options
     options.agc_yaml = None
@@ -1601,31 +1660,31 @@ def main():
         for i,opt in enumerate(options):
             opt.multiple_connections = multiple_connections
             opt.idx = i
-            snd_recorders.append(KiwiWorker(args=(KiwiSoundRecorder(opt),opt,True,False,run_event)))
+            snd_recorders.append(KiwiWorker(args=(KiwiSoundRecorder(opt),opt,True,False,run_event,camp_wait_event)))
 
     wf_recorders = []
     if not gopt.netcat and gopt.waterfall:
         for i,opt in enumerate(options):
             opt.multiple_connections = multiple_connections
             opt.idx = i
-            wf_recorders.append(KiwiWorker(args=(KiwiWaterfallRecorder(opt),opt,True,False,run_event)))
+            wf_recorders.append(KiwiWorker(args=(KiwiWaterfallRecorder(opt),opt,True,False,run_event,camp_wait_event)))
 
     ext_recorders = []
     if not gopt.netcat and (gopt.extension is not None):
         for i,opt in enumerate(options):
             opt.multiple_connections = multiple_connections
             opt.idx = i
-            ext_recorders.append(KiwiWorker(args=(KiwiExtensionRecorder(opt),opt,True,True,run_event)))
+            ext_recorders.append(KiwiWorker(args=(KiwiExtensionRecorder(opt),opt,True,True,run_event,camp_wait_event)))
 
     nc_recorders = []
     if gopt.netcat:
         for i,opt in enumerate(options):
             opt.multiple_connections = multiple_connections
             opt.idx = 0
-            nc_recorders.append(KiwiWorker(args=(KiwiNetcat(opt, True),opt,True,False,run_event)))
-            if gopt.fdx:
+            nc_recorders.append(KiwiWorker(args=(KiwiNetcat(opt, True),opt,True,False,run_event,camp_wait_event)))
+            if gopt.rev:
                 opt.idx = 1
-                nc_recorders.append(KiwiWorker(args=(KiwiNetcat(opt, False),opt,False,False,run_event)))
+                nc_recorders.append(KiwiWorker(args=(KiwiNetcat(opt, False),opt,False,False,run_event,camp_wait_event)))
     try:
         for i,r in enumerate(snd_recorders):
             if gopt.launch_delay != 0 and i != 0 and options[i-1].server_host == options[i].server_host:

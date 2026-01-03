@@ -161,7 +161,7 @@ class KiwiSDRStreamBase(object):
         uri = '%s/%d/%s%s' % ('/wb' if self._options.wideband else '', self._options.ws_timestamp, which, '?camp' if self._camp_chan != -1 else '')
         
         while True:
-            logging.info('URL: %s:%d%s' % (host, port, uri))
+            logging.info('URL: %s:%s%s' % (host, port, uri))
             self._socket = socket.create_connection(address=(host, port), timeout=self._options.socket_timeout)
             handshake = ClientHandshakeProcessor(self._socket, host, port)
             location, status_code = handshake.handshake(uri)
@@ -444,6 +444,9 @@ class KiwiSDRStream(KiwiSDRStreamBase):
         elif name == 'camp':
             v = value.split(",")
             logging.debug("%s camp: okay=%s rx=%s" % (prefix, v[0], v[1]))
+            if int(v[0]) == 1:
+                if self._camp_wait_event is not None:
+                    self._camp_wait_event.clear()
             return
         elif name == 'audio_camp':
             v = value.split(",")
@@ -501,6 +504,7 @@ class KiwiSDRStream(KiwiSDRStreamBase):
             self._set_keepalive()
         elif name == 'monitor':
             if self._camp_chan != -1:
+                #logging.debug('SET MON_CAMP=%d' % self._camp_chan)
                 self._send_message('SET MON_CAMP=%d' % self._camp_chan)
                 self._compression = False
                 self._camping = True
@@ -862,10 +866,15 @@ class KiwiSDRStream(KiwiSDRStreamBase):
                 raise KiwiTimeLimitError('time limit reached')
         else:
             # writer
-            msg = self._writer_message()
+            msg, oob, closed = self._writer_message()
             #logging.debug('writer msg=%s stream_open=%d' % (msg, q_stream_closed.empty()))
-            if q_stream_closed.empty() and msg != None:
-                self._stream.send_message(msg, binary = True if self._options.fdx_snd else False)
+            if closed:
+                raise KiwiConnectionError('writer input closed')
+            if q_stream_closed.empty():
+                if msg != None:
+                    self._stream.send_message(msg, binary = True if self._options.rev_bin else False)
+                if oob != None:
+                    self._stream.send_message(oob, binary = False)
 
     def exit(self):
         raise KiwiTimeLimitError('')
