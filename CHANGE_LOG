@@ -2,6 +2,24 @@ CHANGE_LOG
 
 For the Github commit log see here: github.com/jks-prv/kiwiclient/commits/master
 
+v1.9  January 3, 2025
+    Added --rev-txt, --rev-bin and --rev-oob options to establish reverse connections back to Kiwi
+    while streaming in netcat mode. Can also be used while in camp mode.
+    
+    These changes are necessary to support new Kiwi extensions under development.
+    For example, to support a complex digital decoder that has to run on the kiwisdr.com servers
+    (due to performance reasons similarly to how TDoA works). --nc and --camp-chan can be used to
+    forward a received digital signal from a Kiwi channel to the remote decoder and --rev-bin to
+    stream the decoded audio back to the Kiwi. --rev-oob can return any out-of-band text data
+    decoded from the signal.
+    
+    Added option --camp-allow-1ch which allows camped output to remain in single channel (mono) mode
+    if that is the current state of the camped channel. Normally camped output is always kept as
+    2-channels (stereo) because you can't predict if the camped channel will arbitrarily switch
+    between mono and stereo modes (e.g. AM and SAS or IQ).
+    
+    Github issue #158 fix from mghue (thanks!)
+
 v1.8  December 20, 2025
     Added HTTP redirection support to handle the kiwisdr.com secondary proxy server.
     
