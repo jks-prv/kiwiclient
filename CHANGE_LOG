@@ -2,7 +2,7 @@ CHANGE_LOG
 
 For the Github commit log see here: github.com/jks-prv/kiwiclient/commits/master
 
-v1.9  January 3, 2025
+v1.9  January 3, 2026
     Added --rev-txt, --rev-bin and --rev-oob options to establish reverse connections back to Kiwi
     while streaming in netcat mode. Can also be used while in camp mode.
     
