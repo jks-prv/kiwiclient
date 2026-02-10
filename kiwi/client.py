@@ -254,6 +254,14 @@ class KiwiSDRStream(KiwiSDRStreamBase):
         self._decoder_prev = 0
         self._last_snd_keepalive = self._last_wf_keepalive = 0
 
+        # Sample rate tracking for drift correction
+        self._drift_track_start_time = None
+        self._drift_track_sample_count = 0
+        self._drift_track_window = 180.0  # Track over 3 minutes
+        self._drift_correction_factor = 1.0
+        self._max_drift_seconds = 0.5  # Maximum allowed drift
+        self._last_drift_check = None
+
         self._default_passbands = {
             "am":  [ -4900, 4900 ],
             "amn": [ -2500, 2500 ],
@@ -307,7 +315,7 @@ class KiwiSDRStream(KiwiSDRStreamBase):
         self._num_channels = 2 if self._stereo else 1
         logging.debug('set_mod: stereo=%d num_channels=%d' % (self._stereo, self._num_channels))
         baseband_freq = self._remove_freq_offset(freq)
-        
+
         if lc == None or hc == None:
             if mod in self._default_passbands:
                 lc = self._default_passbands[mod][0] if lc == None else lc
@@ -759,6 +767,67 @@ class KiwiSDRStream(KiwiSDRStreamBase):
 
     def _on_sample_rate_change(self):
         pass
+
+    def _track_sample_rate_drift(self, num_samples):
+        """Track actual sample rate and calculate drift correction factor.
+
+        Measures the actual sample arrival rate over a time window and compares
+        it to the advertised sample rate. Calculates a correction factor to
+        prevent time drift from exceeding _max_drift_seconds.
+
+        Args:
+            num_samples: Number of samples in the current batch
+
+        Returns:
+            float: Drift correction factor to multiply with resampling ratio
+        """
+        if self._sample_rate is None:
+            return 1.0
+
+        current_time = time.time()
+
+        # Initialize tracking on first call
+        if self._drift_track_start_time is None:
+            self._drift_track_start_time = current_time
+            self._drift_track_sample_count = 0
+            self._last_drift_check = current_time
+            return 1.0
+
+        # Accumulate samples
+        self._drift_track_sample_count += num_samples
+        elapsed_time = current_time - self._drift_track_start_time
+
+        # Only check drift after accumulating enough data (at least 30 seconds)
+        if elapsed_time < 30.0:
+            return self._drift_correction_factor
+
+        # Calculate actual sample rate
+        actual_sample_rate = self._drift_track_sample_count / elapsed_time
+        advertised_rate = self._sample_rate
+
+        # Calculate time drift
+        expected_samples = advertised_rate * elapsed_time
+        sample_drift = self._drift_track_sample_count - expected_samples
+        time_drift = sample_drift / advertised_rate
+
+        # Update correction factor if drift exceeds threshold or after tracking window
+        if abs(time_drift) > self._max_drift_seconds or elapsed_time >= self._drift_track_window:
+            # Calculate new correction factor
+            # If actual rate > advertised rate, we need to speed up output (factor > 1)
+            # If actual rate < advertised rate, we need to slow down output (factor < 1)
+            self._drift_correction_factor = actual_sample_rate / advertised_rate
+
+            logging.info("Sample rate drift correction: advertised=%.2f Hz, actual=%.2f Hz, "
+                        "drift=%.3f sec, correction_factor=%.6f" %
+                        (advertised_rate, actual_sample_rate, time_drift,
+                         self._drift_correction_factor))
+
+            # Reset tracking window to continue monitoring
+            self._drift_track_start_time = current_time
+            self._drift_track_sample_count = 0
+            self._last_drift_check = current_time
+
+        return self._drift_correction_factor
 
     def _process_audio_samples(self, seq, samples, rssi, fmt):
         pass
