@@ -254,7 +254,7 @@ class Rigctld(object):
                 reply = ""
                 # sometimes hamlib programs send multiple commands at once
                 for line in command.splitlines():
-                    reply += self._handle_command(s, command)
+                    reply += self._handle_command(s, line)
             else:
                 continue
 
