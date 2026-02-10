@@ -445,7 +445,6 @@ ale:
 
 # kiwiclientd
 kcd:
-#	$(PY) kiwiclientd.py --help
 #	$(PY) kiwiclientd.py $(HP) -f 24000 -m usb --snddev="Display Audio" --rigctl-port=6400
 #	$(PY) kiwiclientd.py $(HP) -f 24000 -m usb --rigctl-port=6400 --log_level info --tlimit=5
 #	$(PY) kiwiclientd.py $(HP) -f 24000 -m iq --rigctl-port=6400 --log_level info --tlimit=5 --if=200
@@ -458,6 +457,8 @@ kcd:
 kcd-mac:
 	$(PY) kiwiclientd.py $(HP) -f 14670 -m usb --enable-rigctl --rigctl-port=6400 --bsize 512 --log_level debug --tlimit=30
 
+kcd-help:
+	$(PY) kiwiclientd.py --help
 
 # time stations
 

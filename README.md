@@ -1,8 +1,8 @@
-[updated 20 December 2025]
+[updated 11 February 2026]
 
 # KiwiClient
 
-This is the version v1.9 Python client for KiwiSDR. It allows you to:
+This is the version v1.10 Python client for KiwiSDR. It allows you to:
 
 * Receive data streams with audio samples, IQ samples, S-meter and waterfall data
 * Issue commands to the KiwiSDR
