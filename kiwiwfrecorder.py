@@ -164,10 +164,6 @@ def main():
     parser.add_option('--pw', '--password',
                       dest='password', type='string', default='',
                       help='Kiwi login password')
-    parser.add_option('--admin',
-                      dest='admin',
-                      action='store_true', default=False,
-                      help='Kiwi login as admin')
     parser.add_option('--connect-timeout', '--connect_timeout',
                       dest='connect_timeout',
                       type='int', default=15,
@@ -224,6 +220,7 @@ def main():
     opt.wf_cal = None
     opt.netcat = False
     opt.wideband = False
+    opt.admin = False
 
     FORMAT = '%(asctime)-15s pid %(process)5d %(message)s'
     logging.basicConfig(level=logging.getLevelName(opt.log_level.upper()), format=FORMAT)
