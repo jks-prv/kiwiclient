@@ -164,6 +164,10 @@ def main():
     parser.add_option('--pw', '--password',
                       dest='password', type='string', default='',
                       help='Kiwi login password')
+    parser.add_option('--admin',
+                      dest='admin',
+                      action='store_true', default=False,
+                      help='Kiwi login as admin')
     parser.add_option('--connect-timeout', '--connect_timeout',
                       dest='connect_timeout',
                       type='int', default=15,
@@ -230,8 +234,8 @@ def main():
     run_event.set()
 
     snd_queue,wf_queue = [Queue(),Queue()]
-    snd_recorder = KiwiWorker(args=(KiwiSoundRecorder    (opt, snd_queue), opt, True, False, run_event))
-    wf_recorder  = KiwiWorker(args=(KiwiWaterfallRecorder(opt, wf_queue),  opt, True, False, run_event))
+    snd_recorder = KiwiWorker(args=(KiwiSoundRecorder    (opt, snd_queue), opt, True, False, run_event, None))
+    wf_recorder  = KiwiWorker(args=(KiwiWaterfallRecorder(opt, wf_queue),  opt, True, False, run_event, None))
     consumer     = Consumer(args=(opt,snd_queue,wf_queue,run_event))
 
     threads = [snd_recorder, wf_recorder, consumer]
