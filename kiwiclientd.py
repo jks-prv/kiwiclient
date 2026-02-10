@@ -667,10 +667,6 @@ def main():
     run_event = threading.Event()
     run_event.set()
 
-    # camp_wait_event is used for camping mode synchronization
-    camp_wait_event = threading.Event()
-    camp_wait_event.set()
-
     options.sdt = 0
     options.dir = None
     options.sound = True
@@ -696,7 +692,7 @@ def main():
     for i,opt in enumerate(options):
         opt.multiple_connections = multiple_connections
         opt.idx = i
-        snd_recorders.append(KiwiWorker(args=(KiwiSoundRecorder(opt),opt,True,False,run_event,camp_wait_event)))
+        snd_recorders.append(KiwiWorker(args=(KiwiSoundRecorder(opt),opt,True,False,run_event,None)))
 
     try:
         for i,r in enumerate(snd_recorders):
