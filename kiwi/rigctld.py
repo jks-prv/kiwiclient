@@ -23,10 +23,15 @@ class rigsocket(socket.socket):
         self.buffer=""
 
     def recv_command(self):
-        buf = self.recv(4096)
+        try:
+            buf = self.recv(4096)
+        except socket.error:
+            # No data available (EAGAIN/EWOULDBLOCK on non-blocking socket)
+            return None
+
         try:
             self.buffer += buf.decode('ASCII')
-        except socket.error:
+        except (socket.error, UnicodeDecodeError):
             # just ignore non-ASCII
             self.buffer = ""
             return ""
@@ -39,11 +44,16 @@ class rigsocket(socket.socket):
             result = self.buffer
             self.buffer = ""
             return result
+        else:
+            # Incomplete command, waiting for more data
+            return None
 
     # nabbed from socket.accept, but returns a rigsock instead
     def accept(self):
         fd, addr = self._accept()
         rigsock = rigsocket(self.family, self.type, self.proto, fileno=fd)
+        # Make client socket non-blocking to match server socket behavior
+        rigsock.setblocking(False)
         if socket.getdefaulttimeout() is None and self.gettimeout():
             sock.setblocking(True)
         return rigsock, addr
@@ -195,8 +205,8 @@ class Rigctld(object):
         elif command.startswith('chk_vfo'):
             return "CHKVFO 0\n"
         elif command.startswith('get_lock_mode'):
-            # unlocked
-            return "2\n"
+            # Return 0 for unlocked (VFO not locked)
+            return "0\nRPRT 0\n"
         elif command.startswith('get_powerstat'):
             # always report that power is on
             return "1\n"
@@ -254,7 +264,7 @@ class Rigctld(object):
                 reply = ""
                 # sometimes hamlib programs send multiple commands at once
                 for line in command.splitlines():
-                    reply += self._handle_command(s, command)
+                    reply += self._handle_command(s, line)
             else:
                 continue
 

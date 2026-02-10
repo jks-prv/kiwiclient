@@ -20,6 +20,7 @@ from traceback import print_exc
 from kiwi import KiwiSDRStream, KiwiWorker
 from optparse import OptionParser
 from optparse import OptionGroup
+from queue import Queue, Empty
 
 HAS_RESAMPLER = True
 try:
@@ -50,6 +51,133 @@ class KiwiSoundRecorder(KiwiSDRStream):
         self._resampler = None
         self._output_sample_rate = 0
 
+        # Audio queue for non-blocking playback
+        self._audio_queue = Queue(maxsize=10)  # Increased size to reduce packet buffering
+        self._playback_thread = None
+        self._playback_running = False
+        self._pending_audio = None  # Buffer for audio packet when queue is full
+
+        # Playback rate adjustment tracking
+        self._pending_audio_history = []  # Track buffer size over time
+        self._playback_rate_adjustment = 1.0  # Multiplier for playback rate
+        self._last_rate_check_time = None
+
+    def _update_playback_rate_adjustment(self):
+        """Adjust playback rate based on pending buffer accumulation."""
+        current_time = time.time()
+
+        # Only check every 2 seconds to allow time for adjustments to take effect
+        if self._last_rate_check_time is None or (current_time - self._last_rate_check_time) < 2.0:
+            return
+
+        self._last_rate_check_time = current_time
+
+        # Calculate pending buffer size in samples
+        pending_size = len(self._pending_audio) if self._pending_audio is not None else 0
+
+        # Track history (keep last 10 measurements)
+        self._pending_audio_history.append(pending_size)
+        if len(self._pending_audio_history) > 10:
+            self._pending_audio_history.pop(0)
+
+        # Need at least 3 measurements to detect trend
+        if len(self._pending_audio_history) < 3:
+            return
+
+        # Calculate trend: is buffer growing or shrinking?
+        recent_avg = sum(self._pending_audio_history[-3:]) / 3.0
+        older_avg = sum(self._pending_audio_history[-6:-3]) / 3.0 if len(self._pending_audio_history) >= 6 else recent_avg
+
+        # Convert to seconds of audio (approximate for stereo 48kHz)
+        pending_seconds = pending_size / (self._output_sample_rate * 2) if pending_size > 0 else 0
+
+        # If buffer is growing significantly, speed up playback slightly
+        # If buffer is shrinking, slow down playback slightly
+        if recent_avg > older_avg * 1.2 and pending_seconds > 0.5:
+            # Buffer growing, speed up playback by 0.1%
+            self._playback_rate_adjustment = min(1.005, self._playback_rate_adjustment + 0.001)
+            logging.info("Playback rate adjustment: %.4f (buffer: %.2fs, growing)" %
+                        (self._playback_rate_adjustment, pending_seconds))
+        elif recent_avg < older_avg * 0.8 and self._playback_rate_adjustment > 1.0:
+            # Buffer shrinking, reduce adjustment
+            self._playback_rate_adjustment = max(1.0, self._playback_rate_adjustment - 0.001)
+            logging.info("Playback rate adjustment: %.4f (buffer: %.2fs, shrinking)" %
+                        (self._playback_rate_adjustment, pending_seconds))
+
+    def _queue_audio(self, samples):
+        """Queue audio samples for non-blocking playback. Accumulates if queue is full."""
+        # Update playback rate adjustment based on buffer trends
+        self._update_playback_rate_adjustment()
+
+        # Apply playback rate adjustment if needed (resample to play faster/slower)
+        if self._playback_rate_adjustment != 1.0:
+            try:
+                if HAS_RESAMPLER:
+                    if not hasattr(self, '_playback_resampler'):
+                        from samplerate import Resampler
+                        # Determine number of channels from sample shape
+                        channels = 1 if len(samples.shape) == 1 else samples.shape[1]
+                        self._playback_resampler = Resampler(channels=channels, converter_type='sinc_fastest')
+                    samples = self._playback_resampler.process(samples, ratio=self._playback_rate_adjustment)
+                else:
+                    # Simple linear interpolation fallback
+                    n = len(samples)
+                    ratio = self._playback_rate_adjustment
+                    xa = np.arange(round(n * ratio)) / ratio
+                    xp = np.arange(n)
+                    if len(samples.shape) == 1:
+                        samples = np.interp(xa, xp, samples).astype(samples.dtype)
+                    else:
+                        # Stereo/multi-channel
+                        new_samples = np.zeros((len(xa), samples.shape[1]), dtype=samples.dtype)
+                        for ch in range(samples.shape[1]):
+                            new_samples[:, ch] = np.interp(xa, xp, samples[:, ch])
+                        samples = new_samples
+            except Exception as e:
+                logging.error("Playback rate adjustment failed: %s" % e)
+
+        # If we have pending audio, concatenate current samples to it
+        if self._pending_audio is not None:
+            # Concatenate along the sample axis (axis 0)
+            self._pending_audio = np.concatenate((self._pending_audio, samples), axis=0)
+        else:
+            self._pending_audio = samples
+
+        # Try to queue pending audio in small chunks to avoid blocking playback thread
+        # Chunk size: ~100ms at 48kHz = 4800 samples, use 8192 for power-of-2
+        chunk_size = 8192
+
+        while self._pending_audio is not None and len(self._pending_audio) > 0:
+            # Take a chunk from pending audio
+            if len(self._pending_audio) <= chunk_size:
+                chunk = self._pending_audio
+                remaining = None
+            else:
+                chunk = self._pending_audio[:chunk_size]
+                remaining = self._pending_audio[chunk_size:]
+
+            # Try to queue this chunk
+            try:
+                self._audio_queue.put(chunk, block=False)
+                # Successfully queued, move to next chunk
+                self._pending_audio = remaining
+            except:
+                # Queue full, stop trying and keep all pending audio for next time
+                break
+
+    def _playback_thread_func(self):
+        """Separate thread for audio playback to avoid blocking rigctl commands."""
+        while self._playback_running:
+            try:
+                # Get audio from queue with timeout
+                samples = self._audio_queue.get(timeout=0.1)
+                if samples is not None:
+                    self._player.play(samples)
+            except Empty:
+                continue  # No audio data, continue checking
+            except Exception as e:
+                logging.error("Playback error: %s" % e)
+
     def _init_player(self):
         if hasattr(self, 'player'):
             self._player.__exit__(exc_type=None, exc_value=None, traceback=None)
@@ -67,13 +195,25 @@ class KiwiSoundRecorder(KiwiSDRStream):
         # pulseaudio has sporadic failures, retry a few times
         for i in range(0,10):
             try:
-                self._player = speaker.player(samplerate=rate)
+                # Use small blocksize to avoid long blocking in play() which delays rigctl frequency changes
+                # blocksize is in frames; at 12kHz, 1024 frames = ~85ms
+                self._player = speaker.player(samplerate=rate, blocksize=1024)
                 self._player.__enter__()
                 break
             except Exception as ex:
                 print("speaker.player failed with ", ex)
                 time.sleep(0.1)
                 pass
+
+        # Start or restart playback thread
+        if self._playback_running:
+            self._playback_running = False
+            if self._playback_thread:
+                self._playback_thread.join(timeout=1.0)
+
+        self._playback_running = True
+        self._playback_thread = threading.Thread(target=self._playback_thread_func, daemon=True)
+        self._playback_thread.start()
 
     def _setup_rx_params(self):
         self.set_name(self._options.user)
@@ -115,20 +255,27 @@ class KiwiSoundRecorder(KiwiSDRStream):
         self._init_player()
 
     def _process_audio_samples(self, seq, samples, rssi, fmt):
+        # Track sample rate and get drift correction factor
+        drift_correction = self._track_sample_rate_drift(len(samples))
+
         if self._options.quiet is False:
-            sys.stdout.write('\rBlock: %08x, RSSI: %6.1f' % (seq, rssi))
+            sys.stdout.write('\rBlock: %08x, RSSI: %6.1f, input_drift: %.6f, output_drift: %.6f' %
+                           (seq, rssi, drift_correction, self._playback_rate_adjustment))
             sys.stdout.flush()
 
         if self._options.resample > 0:
+            # Apply drift correction to resampling ratio
+            corrected_ratio = self._ratio * drift_correction
+
             if HAS_RESAMPLER:
                 ## libsamplerate resampling
                 if self._resampler is None:
                     self._resampler = Resampler(converter_type='sinc_best')
-                samples = np.round(self._resampler.process(samples, ratio=self._ratio)).astype(np.int16)
+                samples = np.round(self._resampler.process(samples, ratio=corrected_ratio)).astype(np.int16)
             else:
                 ## resampling by linear interpolation
                 n  = len(samples)
-                xa = np.arange(round(n*self._ratio))/self._ratio
+                xa = np.arange(round(n*corrected_ratio))/corrected_ratio
                 xp = np.arange(n)
                 samples = np.round(np.interp(xa,xp,samples)).astype(np.int16)
 
@@ -137,7 +284,10 @@ class KiwiSoundRecorder(KiwiSDRStream):
         # samples [-1.0,1.0] SoundCard expects
         fsamples = samples.astype(np.float32)
         fsamples /= 32768
-        self._player.play(fsamples)
+
+        # Queue audio for playback in separate thread (non-blocking)
+        # This allows rigctl commands to be processed immediately
+        self._queue_audio(fsamples)
 
     def _process_stereo_samples_raw(self, seq, data):
         if self._options.quiet is False:
@@ -178,7 +328,8 @@ class KiwiSoundRecorder(KiwiSDRStream):
             # save phase  for next time, modulo 2π
             self.startph = stopph % (2*np.pi)
 
-        self._player.play(s)
+        # Queue audio for non-blocking playback
+        self._queue_audio(s)
 
     # phase for frequency shift
     startph = np.float32(0)
@@ -234,7 +385,8 @@ class KiwiSoundRecorder(KiwiSDRStream):
             # save phase  for next time, modulo 2π
             self.startph = stopph % (2*np.pi)
 
-        self._player.play(s)
+        # Queue audio for non-blocking playback
+        self._queue_audio(s)
 
         # no GPS or no recent GPS solution
         last = gps['last_gps_solution']
@@ -515,6 +667,10 @@ def main():
     run_event = threading.Event()
     run_event.set()
 
+    # camp_wait_event is used for camping mode synchronization
+    camp_wait_event = threading.Event()
+    camp_wait_event.set()
+
     options.sdt = 0
     options.dir = None
     options.sound = True
@@ -529,6 +685,9 @@ def main():
     options.wf_cal = None
     options.netcat = False
     options.wideband = False
+    options.admin = False
+    options.password = ''
+    options.tlimit_password = ''
 
     gopt = options
     multiple_connections,options = options_cross_product(options)
@@ -537,7 +696,7 @@ def main():
     for i,opt in enumerate(options):
         opt.multiple_connections = multiple_connections
         opt.idx = i
-        snd_recorders.append(KiwiWorker(args=(KiwiSoundRecorder(opt),opt,True,False,run_event)))
+        snd_recorders.append(KiwiWorker(args=(KiwiSoundRecorder(opt),opt,True,False,run_event,camp_wait_event)))
 
     try:
         for i,r in enumerate(snd_recorders):
