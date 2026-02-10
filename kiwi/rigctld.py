@@ -195,8 +195,8 @@ class Rigctld(object):
         elif command.startswith('chk_vfo'):
             return "CHKVFO 0\n"
         elif command.startswith('get_lock_mode'):
-            # unlocked
-            return "2\n"
+            # Return 0 for unlocked (VFO not locked)
+            return "0\nRPRT 0\n"
         elif command.startswith('get_powerstat'):
             # always report that power is on
             return "1\n"
