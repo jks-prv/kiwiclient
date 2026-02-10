@@ -197,7 +197,7 @@ class KiwiSoundRecorder(KiwiSDRStream):
             try:
                 # Use small blocksize to avoid long blocking in play() which delays rigctl frequency changes
                 # blocksize is in frames; at 12kHz, 1024 frames = ~85ms
-                self._player = speaker.player(samplerate=rate, blocksize=1024)
+                self._player = speaker.player(samplerate=rate, blocksize=self._options.blocksize)
                 self._player.__enter__()
                 break
             except Exception as ex:
@@ -627,6 +627,10 @@ def main():
                       default=False,
                       action='store_true',
                       help='List available sound devices and exit')
+    group.add_option('--bsize', '--blocksize',
+                      dest='blocksize',
+                      type='int', default=1024,
+                      help='Sound player blocksize (bytes)')
     parser.add_option_group(group)
 
     group = OptionGroup(parser, "Rig control options", "")
