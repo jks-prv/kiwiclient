@@ -454,9 +454,6 @@ kcd:
 #	$(PY) kiwiclientd.py $(HP) -f 24000.7 --pbc -m am -L -500 -H 500 --log_level debug --tlimit=5 
 #	$(PY) kiwiclientd.py $(HP) -f 24001.7 -m am -L -500 -H 500 --log_level debug --tlimit=5 
 
-kcd-mac:
-	$(PY) kiwiclientd.py $(HP) -f 14670 -m usb --enable-rigctl --rigctl-port=6400 --bsize 512 --log_level debug --tlimit=30
-
 kcd-help:
 	$(PY) kiwiclientd.py --help
 
