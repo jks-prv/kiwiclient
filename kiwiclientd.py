@@ -629,7 +629,7 @@ def main():
                       help='List available sound devices and exit')
     group.add_option('--bsize', '--blocksize',
                       dest='blocksize',
-                      type='int', default=1024,
+                      type='int', default=512,
                       help='Sound player blocksize (bytes)')
     parser.add_option_group(group)
 
