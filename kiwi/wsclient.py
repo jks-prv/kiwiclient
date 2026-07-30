@@ -389,10 +389,14 @@ class ClientHandshakeProcessor(ClientHandshakeBase):
 
             raise ClientHandshakeError('Unexpected extension %r' % extension_name)
 
+        # A server is free to decline an offered extension per the WebSocket
+        # spec -- that's not a handshake failure, just proceed uncompressed.
         if (self._deflate_frame and not deflate_frame_accepted):
-            raise ClientHandshakeError('Requested %s, but the server rejected it' % common.DEFLATE_FRAME_EXTENSION)
+            self._logger.debug('Requested %s, but the server declined it -- continuing uncompressed', common.DEFLATE_FRAME_EXTENSION)
+            self._deflate_frame = False
         if (self._use_permessage_deflate and not permessage_deflate_accepted):
-            raise ClientHandshakeError('Requested %s, but the server rejected it' % common.PERMESSAGE_DEFLATE_EXTENSION)
+            self._logger.debug('Requested %s, but the server declined it -- continuing uncompressed', common.PERMESSAGE_DEFLATE_EXTENSION)
+            self._use_permessage_deflate = False
         
         return None, status_code
 
