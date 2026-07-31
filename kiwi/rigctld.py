@@ -29,6 +29,10 @@ class rigsocket(socket.socket):
             # No data available (EAGAIN/EWOULDBLOCK on non-blocking socket)
             return None
 
+        if len(buf) == 0:
+            # peer closed the connection (TCP EOF)
+            return False
+
         try:
             self.buffer += buf.decode('ASCII')
         except (socket.error, UnicodeDecodeError):
@@ -104,12 +108,15 @@ class Rigctld(object):
         try:
             splitcmd = command.split()
             mod = splitcmd[1]
+            if mod.lower() == "pktusb":
+                # FreeDV/hamlib requests Icom-style "packet over USB" mode, which
+                # KiwiSDR has no concept of -- treat it as plain USB.
+                mod = "usb"
             try:
                 hc = int(splitcmd[2])
             except:
                 hc = None
             freq = self._kiwisdrstream.get_frequency()
-            # print("calling set_mod", mod, lc, hc, freq)
             self._kiwisdrstream.set_mod(mod, None, hc, freq)
             return "RPRT 0\n"
         except:
@@ -258,6 +265,13 @@ class Rigctld(object):
             try:
                 command = s.recv_command()
             except socket.error:
+                continue
+
+            if command is False:
+                # peer closed the connection -- close our end too, otherwise
+                # it leaks as a CLOSE_WAIT socket forever
+                s.close()
+                self._clientsockets.remove(s)
                 continue
 
             if command != None and len(command) > 0:

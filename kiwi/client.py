@@ -373,7 +373,7 @@ class KiwiSDRStream(KiwiSDRStreamBase):
         self._send_message('SET gen=%d mix=%d' % (freq, -1))
 
     def _set_zoom_cf(self, zoom, cf_kHz):
-        if self._kiwi_version >= 1.329:
+        if self._kiwi_version is not None and self._kiwi_version >= 1.329:
             self._send_message('SET zoom=%d cf=%f' % (zoom, cf_kHz))
         else:
             (counter,start_frequency) = self.start_frequency_to_counter(cf_kHz - self.zoom_to_span(zoom)/2)

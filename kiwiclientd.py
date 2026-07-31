@@ -179,7 +179,7 @@ class KiwiSoundRecorder(KiwiSDRStream):
                 logging.error("Playback error: %s" % e)
 
     def _init_player(self):
-        if hasattr(self, 'player'):
+        if hasattr(self, '_player'):
             self._player.__exit__(exc_type=None, exc_value=None, traceback=None)
         options = self._options
         speaker = sc.get_speaker(options.sounddevice)
