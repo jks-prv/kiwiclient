@@ -425,6 +425,8 @@ no-api-ext:
 	$(KREC) $(HP) --no-api --bad-cmd --ext=DRM --test-mode --quiet --snd $(BAD)
 no-user:
 	$(KREC) $(HP) --no-api --user=none $(BAD)
+sec:
+	$(KREC) $(HP) $(F_PB) --tlimit=15 --nolocal --log-level=debug
 
 
 # IQ file with GPS timestamps
@@ -514,7 +516,8 @@ wf-bug:
 # DX labels
 
 dx-list dx:
-	$(KREC) $(HP) --dx-list=9 12 --log_level=info
+#	$(KREC) $(HP) --dx-list=9 12 --log_level=info
+	$(KREC) $(HP) --dx-list=0 30000 --log_level=info
 	cat dx.json
 
 dx-add:
