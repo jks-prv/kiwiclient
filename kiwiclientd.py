@@ -51,58 +51,75 @@ class KiwiSoundRecorder(KiwiSDRStream):
         self._resampler = None
         self._output_sample_rate = 0
 
-        # Audio queue for non-blocking playback
-        self._audio_queue = Queue(maxsize=10)  # Increased size to reduce packet buffering
+        # Chunk size for queue draining: power-of-2, ~100-200ms at typical rates
+        self._chunk_size = 8192
+
+        # Audio queue for non-blocking playback — maxsize computed
+        # from target latency and chunk size when sample rate is known.
+        self._audio_queue = Queue()
         self._playback_thread = None
         self._playback_running = False
         self._pending_audio = None  # Buffer for audio packet when queue is full
 
-        # Playback rate adjustment tracking
-        self._pending_audio_history = []  # Track buffer size over time
-        self._playback_rate_adjustment = 1.0  # Multiplier for playback rate
-        self._last_rate_check_time = None
+        # Playback rate adjustment tracking — PID-style convergence
+        self._playback_rate_adjustment = 1.0  # Stable output rate multiplier
+        self._pending_ref_sec = None           # Reference buffer size (30s ago)
+        self._pending_ref_time = None           # When reference was taken
+        self._rate_check_interval = 30.0        # Check drift every 30s
+        self._recovery_count = 0                # Consecutive near-empty windows
 
     def _update_playback_rate_adjustment(self):
-        """Adjust playback rate based on pending buffer accumulation."""
-        current_time = time.time()
+        """Converge to the true sound-card clock rate by watching the buffer.
 
-        # Only check every 2 seconds to allow time for adjustments to take effect
-        if self._last_rate_check_time is None or (current_time - self._last_rate_check_time) < 2.0:
+        The hardware crystal mismatch between the KiwiSDR and the local
+        sound card is a constant.  Instead of reacting to sub-second
+        measurement noise, we compare the pending buffer size against a
+        30‑second-old reference.  If the buffer is still growing we inch
+        the playback rate up; once the growth stops we hold the rate
+        steady.  This converges once and stays locked — no oscillation,
+        no ongoing resampling drift.
+        """
+        now = time.time()
+
+        # Rate-limit checks to 30s intervals so the drift signal has time
+        # to accumulate above noise.
+        if self._pending_ref_time and (now - self._pending_ref_time) < self._rate_check_interval:
             return
 
-        self._last_rate_check_time = current_time
-
-        # Calculate pending buffer size in samples
         pending_size = len(self._pending_audio) if self._pending_audio is not None else 0
+        pending_sec = pending_size / max(self._output_sample_rate, 1)
 
-        # Track history (keep last 10 measurements)
-        self._pending_audio_history.append(pending_size)
-        if len(self._pending_audio_history) > 10:
-            self._pending_audio_history.pop(0)
-
-        # Need at least 3 measurements to detect trend
-        if len(self._pending_audio_history) < 3:
+        if self._pending_ref_sec is None:
+            # First sample — store as reference.
+            self._pending_ref_sec = pending_sec
+            self._pending_ref_time = now
             return
 
-        # Calculate trend: is buffer growing or shrinking?
-        recent_avg = sum(self._pending_audio_history[-3:]) / 3.0
-        older_avg = sum(self._pending_audio_history[-6:-3]) / 3.0 if len(self._pending_audio_history) >= 6 else recent_avg
+        # Thresholds scale with the queue size so they self-tune when
+        # sample rate or chunk size changes.  Growth > 2× queue latency
+        # means we're leaking; < 0.5× means we have headroom.
+        growth_limit = self._queue_latency * 2.0
+        drain_limit  = self._queue_latency * 0.5
 
-        # Convert to seconds of audio (approximate for stereo 48kHz)
-        pending_seconds = pending_size / (self._output_sample_rate * 2) if pending_size > 0 else 0
+        if pending_sec > growth_limit:
+            self._playback_rate_adjustment += 0.00001
+            self._recovery_count = 0
+            logging.info("PBA: %.6f (buffer %.3fs, growing)" %
+                         (self._playback_rate_adjustment, pending_sec))
+        elif pending_sec < drain_limit and self._playback_rate_adjustment > 1.0:
+            # Buffer draining — require 2 consecutive windows before easing.
+            self._recovery_count += 1
+            if self._recovery_count >= 2:
+                self._playback_rate_adjustment -= 0.00001
+                self._recovery_count = 0
+                logging.info("PBA: %.6f (buffer %.3fs, recovering)" %
+                             (self._playback_rate_adjustment, pending_sec))
+        else:
+            self._recovery_count = 0
 
-        # If buffer is growing significantly, speed up playback slightly
-        # If buffer is shrinking, slow down playback slightly
-        if recent_avg > older_avg * 1.2 and pending_seconds > 0.5:
-            # Buffer growing, speed up playback by 0.1%
-            self._playback_rate_adjustment = min(1.005, self._playback_rate_adjustment + 0.001)
-            logging.info("Playback rate adjustment: %.4f (buffer: %.2fs, growing)" %
-                        (self._playback_rate_adjustment, pending_seconds))
-        elif recent_avg < older_avg * 0.8 and self._playback_rate_adjustment > 1.0:
-            # Buffer shrinking, reduce adjustment
-            self._playback_rate_adjustment = max(1.0, self._playback_rate_adjustment - 0.001)
-            logging.info("Playback rate adjustment: %.4f (buffer: %.2fs, shrinking)" %
-                        (self._playback_rate_adjustment, pending_seconds))
+        # Store new reference for the next window.
+        self._pending_ref_sec = pending_sec
+        self._pending_ref_time = now
 
     def _queue_audio(self, samples):
         """Queue audio samples for non-blocking playback. Accumulates if queue is full."""
@@ -118,12 +135,12 @@ class KiwiSoundRecorder(KiwiSDRStream):
                         # Determine number of channels from sample shape
                         channels = 1 if len(samples.shape) == 1 else samples.shape[1]
                         self._playback_resampler = Resampler(channels=channels, converter_type='sinc_fastest')
-                    samples = self._playback_resampler.process(samples, ratio=self._playback_rate_adjustment)
+                    samples = self._playback_resampler.process(samples, ratio=1.0 / self._playback_rate_adjustment)
                 else:
                     # Simple linear interpolation fallback
                     n = len(samples)
                     ratio = self._playback_rate_adjustment
-                    xa = np.arange(round(n * ratio)) / ratio
+                    xa = np.arange(round(n / ratio)) * ratio
                     xp = np.arange(n)
                     if len(samples.shape) == 1:
                         samples = np.interp(xa, xp, samples).astype(samples.dtype)
@@ -143,9 +160,10 @@ class KiwiSoundRecorder(KiwiSDRStream):
         else:
             self._pending_audio = samples
 
-        # Try to queue pending audio in small chunks to avoid blocking playback thread
-        # Chunk size: ~100ms at 48kHz = 4800 samples, use 8192 for power-of-2
-        chunk_size = 8192
+        # Try to queue pending audio in small chunks to avoid blocking
+        # playback thread.  Chunk size is a power-of-2, ~100-200ms at
+        # typical rates.
+        chunk_size = self._chunk_size
 
         while self._pending_audio is not None and len(self._pending_audio) > 0:
             # Take a chunk from pending audio
@@ -198,6 +216,8 @@ class KiwiSoundRecorder(KiwiSDRStream):
                 # Use small blocksize to avoid long blocking in play() which delays rigctl frequency changes
                 # blocksize is in frames; at 12kHz, 1024 frames = ~85ms
                 self._player = speaker.player(samplerate=rate, blocksize=self._options.blocksize)
+                if hasattr(self._options, 'pa_buffer_samples') and self._options.pa_buffer_samples > 0:
+                    self._player._pa_max_buffer_samples = self._options.pa_buffer_samples
                 self._player.__enter__()
                 break
             except Exception as ex:
@@ -254,6 +274,15 @@ class KiwiSoundRecorder(KiwiSDRStream):
                     self._output_sample_rate, self._ifreq, self._ifreq * 4))
         self._init_player()
 
+        # Size the audio queue for ~0.2s target latency at the output
+        # sample rate, using the configured chunk size for granularity.
+        # Floor at 2 to avoid underruns when the computed size rounds to 1.
+        target_latency = 0.2    # seconds
+        self._audio_queue.maxsize = max(2, int(target_latency * self._output_sample_rate / self._chunk_size))
+        # Derived queue latency for self-tuning rate-adjustment thresholds.
+        self._queue_latency = (self._audio_queue.maxsize * self._chunk_size /
+                               self._output_sample_rate)
+
     def _process_audio_samples(self, seq, samples, rssi, fmt):
         # Track sample rate and get drift correction factor
         drift_correction = self._track_sample_rate_drift(len(samples))
@@ -265,7 +294,7 @@ class KiwiSoundRecorder(KiwiSDRStream):
 
         if self._options.resample > 0:
             # Apply drift correction to resampling ratio
-            corrected_ratio = self._ratio * drift_correction
+            corrected_ratio = self._ratio / drift_correction
 
             if HAS_RESAMPLER:
                 ## libsamplerate resampling
@@ -631,6 +660,10 @@ def main():
                       dest='blocksize',
                       type='int', default=512,
                       help='Sound player blocksize (bytes)')
+    group.add_option('--pa-buffer-samples',
+                      dest='pa_buffer_samples',
+                      type='int', default=11025,
+                      help='PulseAudio max buffer in samples (default 11025=0.25s@44.1kHz, 0=unlimited)')
     parser.add_option_group(group)
 
     group = OptionGroup(parser, "Rig control options", "")
