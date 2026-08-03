@@ -32,6 +32,7 @@ else
 endif
 
 KREC = $(PY) -u kiwirecorder.py
+KCLD = $(PY) -u kiwiclientd.py
 
 HP = -s $(HOST) -p $(PORT)
 H2 = -s $(HOST),$(HOST) -p $(PORT)
@@ -447,17 +448,17 @@ ale:
 
 # kiwiclientd
 kcd:
-#	$(PY) kiwiclientd.py $(HP) -f 24000 -m usb --snddev="Display Audio" --rigctl-port=6400
-#	$(PY) kiwiclientd.py $(HP) -f 24000 -m usb --rigctl-port=6400 --log_level info --tlimit=5
-#	$(PY) kiwiclientd.py $(HP) -f 24000 -m iq --rigctl-port=6400 --log_level info --tlimit=5 --if=200
-#	$(PY) kiwiclientd.py $(HP) -f 24001.16 -m cwn --rigctl-port=6400 --log_level debug --tlimit=5 
-	$(PY) kiwiclientd.py $(HP) -f 14670 -m usb --enable-rigctl --rigctl-port=6400 --log_level debug --tlimit=30
-#	$(PY) kiwiclientd.py $(HP) -f 10136 -m usb --enable-rigctl --rigctl-port=6400 --log_level debug --tlimit=30
-#	$(PY) kiwiclientd.py $(HP) -f 24000.7 --pbc -m am -L -500 -H 500 --log_level debug --tlimit=5 
-#	$(PY) kiwiclientd.py $(HP) -f 24001.7 -m am -L -500 -H 500 --log_level debug --tlimit=5 
+#	$(KCLD) $(HP) -f 24000 -m usb --snddev="Display Audio" --rigctl-port=6400
+#	$(KCLD) $(HP) -f 24000 -m usb --rigctl-port=6400 --log_level info --tlimit=5
+#	$(KCLD) $(HP) -f 24000 -m iq --rigctl-port=6400 --log_level info --tlimit=5 --if=200
+#	$(KCLD) $(HP) -f 24001.16 -m cwn --rigctl-port=6400 --log_level debug --tlimit=5 
+	$(KCLD) $(HP) -f 14670 -m usb --enable-rigctl --rigctl-port=6400 --log_level debug --tlimit=30
+#	$(KCLD) $(HP) -f 10136 -m usb --enable-rigctl --rigctl-port=6400 --log_level debug --tlimit=30
+#	$(KCLD) $(HP) -f 24000.7 --pbc -m am -L -500 -H 500 --log_level debug --tlimit=5 
+#	$(KCLD) $(HP) -f 24001.7 -m am -L -500 -H 500 --log_level debug --tlimit=5 
 
 kcd-help:
-	$(PY) kiwiclientd.py --help
+	$(KCLD) --help
 
 # time stations
 
@@ -647,6 +648,7 @@ rsync_bit:
 
 version ver v:
 	$(KREC) --version
+	$(KCLD) --version
 
 help h:
 	@echo HOST = $(HOST)

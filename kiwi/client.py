@@ -27,6 +27,8 @@ from mod_pywebsocket._stream_base import ConnectionTerminatedException
 from mod_pywebsocket.stream import Stream, StreamOptions
 from .wsclient import ClientHandshakeProcessor, ClientRequest
 
+VERSION = 'v1.11'
+
 #
 # IMAADPCM decoder
 #

@@ -7,8 +7,6 @@
 ##      IQ-swap, endian-reversal, squelch, option to include GPS data ...
 ##
 
-VERSION = 'v1.9'
-
 import array, logging, os, struct, sys, time, copy, threading, os
 import gc
 import math
@@ -16,7 +14,7 @@ import numpy as np
 from copy import copy
 from traceback import print_exc
 import png
-from kiwi import KiwiSDRStream, KiwiWorker
+from kiwi import VERSION, KiwiSDRStream, KiwiWorker
 import optparse as optparse
 from optparse import OptionParser
 from optparse import OptionGroup

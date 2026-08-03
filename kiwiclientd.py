@@ -17,7 +17,7 @@ import soundcard as sc
 import numpy as np
 from copy import copy
 from traceback import print_exc
-from kiwi import KiwiSDRStream, KiwiWorker
+from kiwi import VERSION, KiwiSDRStream, KiwiWorker
 from optparse import OptionParser
 from optparse import OptionGroup
 from queue import Queue, Empty
@@ -691,7 +691,7 @@ def main():
     parser.destroy()
     
     if options.krec_version:
-        print('kiwiclientd v1.0')
+        print('kiwiclientd %s' % VERSION)
         sys.exit()
 
     if options.list_sound_devices:

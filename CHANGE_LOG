@@ -2,6 +2,23 @@ CHANGE_LOG
 
 For the Github commit log see here: github.com/jks-prv/kiwiclient/commits/master
 
+v1.11  August 3, 2026
+    kiwiclientd: Github PR #162 "fix excessive audio latency" from Rik van Riel (thanks!)
+        The audio latency issue took a long time to debug (apologies) because several different
+            bugs were involved:
+
+        1. The amount of audio queued to the pulseaudio system on Linux was not capped,
+            so latency could build up outside of kiwiclient. Fixing that made it possible
+            to finally debug the other two issues.
+
+        2. Sample rate correction calculations were backwards.
+        
+        3. The timing measurements for the above are subject to error due to jitter.
+            Add some additional correction on top of that, based on queue length checks.
+        
+        With these fixes, kiwiclientd can quickly switch frequency and show the new audio,
+            even after a day of uptime.
+
 v1.10  February 11, 2026
     kiwiclientd: Github PR #159 fixes from Rik van Riel (thanks!)
         Non-blocking audio and automatic resampling
